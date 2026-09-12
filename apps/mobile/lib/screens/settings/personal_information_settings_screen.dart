@@ -264,8 +264,15 @@ class _PersonalInformationSettingsScreenState
               description: InterestsStorage.selected.isEmpty
                   ? 'Nenhum escolhido'
                   : InterestsStorage.selected.map((i) => i.label).join(', '),
-              onTap: () =>
-                  Navigator.pushNamed(context, AppRoutes.userInterests),
+              // A descrição acima lê `InterestsStorage` no build, e voltar de
+              // uma rota não reconstrói a de baixo: sem este setState a linha
+              // continuaria mostrando a lista antiga até a tela ser refeita
+              // por outro motivo.
+              onTap: () async {
+                await Navigator.pushNamed(context, AppRoutes.userInterests);
+                if (!mounted) return;
+                setState(() {});
+              },
             ),
 
             const SettingsGroupLabel('CONTA'),

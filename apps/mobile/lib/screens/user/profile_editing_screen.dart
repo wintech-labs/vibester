@@ -118,7 +118,15 @@ class _ProfileEditingScreenState extends State<ProfileEditingScreen> {
       if (!mounted) return;
       context.read<UserProvider>().setUser(usuarioAtualizado);
 
-      Navigator.pushNamed(context, AppRoutes.userInterests);
+      // Esta tela só existe dentro do cadastro hoje, então os interesses que
+      // ela abre são o passo seguinte do fluxo, não uma edição. No dia em que
+      // existir um "editar perfil" a partir do perfil, este `true` precisa
+      // virar um flag desta tela também.
+      Navigator.pushNamed(
+        context,
+        AppRoutes.userInterests,
+        arguments: true,
+      );
     } catch (e) {
       debugPrint(e.toString());
 

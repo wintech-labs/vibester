@@ -17,18 +17,57 @@ import 'package:mobile/widgets/graffiti/grain.dart';
 /// lista em memória, que sumia ao fechar o app. Também deixou de ter um
 /// `SizedBox(height: 300)` fixo empurrando o botão para baixo: a ação fica
 /// ancorada no rodapé em qualquer tamanho de tela.
+///
+/// A tela serve dois contextos, e o que muda entre eles é só [noCadastro].
 class UserInterestsScreen extends StatefulWidget {
-  const UserInterestsScreen({super.key});
+  /// Esta tela é um passo do cadastro, e não uma edição avulsa.
+  ///
+  /// No cadastro ela é o último passo antes do onboarding: marca o onboarding
+  /// como pendente e descarta a pilha inteira. Aberta pelas configurações, ela
+  /// é só um formulário — salva e volta de onde veio.
+  ///
+  /// O padrão é `false` de propósito: o comportamento destrutivo precisa ser
+  /// pedido, o inofensivo vem de graça. Um terceiro ponto de entrada que
+  /// esqueça de configurar isso fecha normal, em vez de jogar o usuário no
+  /// tutorial de boas-vindas.
+  final bool noCadastro;
+
+  const UserInterestsScreen({this.noCadastro = false, super.key});
 
   @override
   State<UserInterestsScreen> createState() => _UserInterestsScreenState();
 }
 
 class _UserInterestsScreenState extends State<UserInterestsScreen> {
-  final List<Interest> _interests = defaultInterests;
+  /// Seleção em edição, por id.
+  ///
+  /// Cópia local de propósito: `defaultInterests` é uma lista global e mutável
+  /// que alimenta a régua de categorias da Home. Alternando os chips nela
+  /// direto, sair sem confirmar já teria mudado a Home de quem não salvou
+  /// nada — e só voltaria ao normal no próximo boot, quando o
+  /// `InterestsStorage.restore` reaplicasse o disco por cima.
+  late final Set<String> _selecionados = {
+    for (final interest in defaultInterests)
+      if (interest.selected) interest.id,
+  };
+
+  bool get noCadastro => widget.noCadastro;
 
   Future<void> _continuar() async {
-    await InterestsStorage.save(_interests);
+    // Só aqui a escolha sai da tela: aplica na lista global e persiste.
+    for (final interest in defaultInterests) {
+      interest.selected = _selecionados.contains(interest.id);
+    }
+    await InterestsStorage.save(defaultInterests);
+    if (!mounted) return;
+
+    // Edição avulsa (configurações): os interesses já foram salvos, então a
+    // tela só sai de cena. Sem isso, trocar um interesse pelas configurações
+    // descartava a pilha e mandava um usuário antigo para o onboarding.
+    if (!noCadastro) {
+      Navigator.pop(context);
+      return;
+    }
 
     // Marca o onboarding como pendente antes de abri-lo, para que ele
     // reapareça se o app for fechado no meio.
@@ -48,7 +87,7 @@ class _UserInterestsScreenState extends State<UserInterestsScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final selecionados = _interests.where((i) => i.selected).length;
+    final selecionados = _selecionados.length;
 
     return Scaffold(
       backgroundColor: colors.noturno,
@@ -72,14 +111,16 @@ class _UserInterestsScreenState extends State<UserInterestsScreen> {
                       spacing: AppSpacing.sm,
                       runSpacing: AppSpacing.xs,
                       children: [
-                        for (final interest in _interests)
+                        for (final interest in defaultInterests)
                           VibesterChip(
                             label: interest.label,
                             emoji: interest.emoji,
-                            selected: interest.selected,
-                            onTap: () => setState(
-                              () => interest.selected = !interest.selected,
-                            ),
+                            selected: _selecionados.contains(interest.id),
+                            onTap: () => setState(() {
+                              if (!_selecionados.remove(interest.id)) {
+                                _selecionados.add(interest.id);
+                              }
+                            }),
                           ),
                       ],
                     ),

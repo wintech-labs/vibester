@@ -381,8 +381,13 @@ class _MyAppState extends State<MyApp> {
                   settings,
                 );
               case AppRoutes.userInterests:
+                // `arguments: true` só vem do cadastro (ver
+                // ProfileEditingScreen). Sem argumento a tela é uma edição
+                // avulsa e apenas volta ao fechar.
                 return vibesterSlideRoute(
-                  const UserInterestsScreen(),
+                  UserInterestsScreen(
+                    noCadastro: settings.arguments as bool? ?? false,
+                  ),
                   settings,
                 );
               case AppRoutes.otherProfile:
