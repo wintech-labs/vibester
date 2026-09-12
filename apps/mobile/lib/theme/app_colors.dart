@@ -39,7 +39,8 @@ class AppColors extends ThemeExtension<AppColors> {
   // Superfícies derivadas
   //
   // A paleta do Vibester (navy / ambar / brasa / noturno / darkGrey / grey) é
-  // patrimônio da marca e não muda. O que falta pra construir hierarquia de
+  // patrimônio da marca: os *papéis* não mudam entre temas, só a matiz. O que
+  // falta pra construir hierarquia de
   // profundidade não é cor nova, e sim *camada*: as superfícies abaixo são
   // todas derivadas por opacidade/mistura dos tokens existentes, então o app
   // continua cromaticamente idêntico a si mesmo.
@@ -153,19 +154,52 @@ class AppColors extends ThemeExtension<AppColors> {
     error: Color(0xFFFF5252),
   );
 
+  /// Tema claro — espelho frio da paleta escura.
+  ///
+  /// O par `ambar`/`brasa` não se distingue por profundidade: no tema escuro
+  /// eles têm claridade 50 e 55 e apenas 1,35:1 de contraste entre si. O que
+  /// separa os dois é **matiz** — 19°, de laranja-amarelo a vermelho. Este
+  /// tema reproduz essa relação, não a aparência.
+  ///
+  /// A distância virou 49°, e isso é de propósito: a percepção de matiz é
+  /// comprimida no azul. 19° na faixa quente atravessa duas cores nomeáveis;
+  /// 19° na faixa fria é indistinguível. 49° entre ciano e índigo devolve a
+  /// mesma separação que o par original tem a olho nu, e a razão de claridade
+  /// entre eles fica em 1,41:1 — praticamente o 1,35:1 do par quente.
+  ///
+  /// A posição em relação ao papel, essa sim, inverte: no escuro o acento é
+  /// mais claro que o fundo, aqui é mais escuro. Ambos os tokens são cor de
+  /// *texto* em dezenas de telas, não só preenchimento, então os dois ficam
+  /// acima de 4,5:1 sobre [noturno] — é esse piso que impede um azul mais
+  /// claro que estes.
+  ///
+  /// [error] é a única cor quente que sobra, de propósito: erro não espelha.
   static const AppColors light = AppColors(
-    navy: Color.fromARGB(255, 136, 123, 179),
-    ambar: Color(0xFFF88806),
-    grey: Color(0xFF94A3B8),
+    // Azul claríssimo — fonte de `surface` (#E1EAF5) e `surfaceRaised`
+    // (#D4E0F1). Matiz 215°, entre os dois acentos, para não puxar as
+    // camadas nem pro ciano nem pro índigo.
+    navy: Color(0xFFCFDDF0),
+    // 195° — ciano-azur. O lado luminoso do par: 4,8:1 sobre o papel, logo
+    // acima do piso de texto. Nenhum azul mais claro que este serve como
+    // `ambar`, porque `ambar` é cor de texto em dezenas de telas.
+    ambar: Color.fromARGB(255, 77, 190, 255),
+    // Escurecido de #94A3B8 mantendo a matiz: `hairline` deriva daqui por
+    // opacidade e, com o cinza claro, o separador sumia sobre `surface`.
+    grey: Color(0xFF64748B),
     darkGrey: Color(0xFFF0EDF5),
-    brasa: Color(0xFFFF4D1C),
-    noturno: Color(0xFFFFFFFF),
-    textPrimary: Color(0xFF17112A),
-    textSecondary: Color(0xFF4B4560),
-    textMuted: Color(0xFF6B6580),
-    textDisabled: Color(0xFF9A94AC),
-    border: Color(0xFFD8D3E0),
-    error: Color(0xFFD32F2F),
+    // 244° — índigo. 49° de distância do `ambar`: é o que dá ao [gradient] da
+    // marca uma viagem de matiz de verdade, em vez de um degradê de brilho
+    // entre dois azuis parecidos.
+    brasa: Color(0xFF4A3FD6),
+    // Branco com pigmento azul, como o noturno escuro e um preto com pigmento
+    // roxo. Papel branco puro tira a temperatura da tela inteira.
+    noturno: Color(0xFFF7F9FC),
+    textPrimary: Color(0xFF0B1B33),
+    textSecondary: Color(0xFF33455C),
+    textMuted: Color(0xFF5A6B82),
+    textDisabled: Color(0xFF8D9BAE),
+    border: Color(0xFFC3D2E6),
+    error: Color(0xFFC62828),
   );
 
   /// Alias mantido para não quebrar código legado que ainda referencie o

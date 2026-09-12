@@ -402,6 +402,13 @@ class _Headline extends StatelessWidget {
   /// Precisa estar declarado no `pubspec.yaml` (ver `flutter: assets:`).
   static const _asset = 'assets/img/mascote/mascote.png';
 
+  /// Versão fria do mascote, para o tema claro.
+  ///
+  /// Não é um arquivo solto: os três tons do fogo são exatamente `brasa`,
+  /// `ambar` e a interpolação entre os dois na paleta clara. Trocar aqui é o
+  /// que impede o mascote de ser a única coisa quente numa tela fria.
+  static const _assetLight = 'assets/img/mascote/mascote_azul.png';
+
   /// Abaixo disso o mascote fica irreconhecível — melhor não desenhar.
   static const _minWidth = 64.0;
 
@@ -417,6 +424,11 @@ class _Headline extends StatelessWidget {
     final colors = context.colors;
     final style = context.typography.displayHuge;
     final scaler = MediaQuery.textScalerOf(context);
+    // Segue o brilho efetivo do tema, não o `ThemeMode` do provider: assim
+    // `ThemeMode.system` também acerta o mascote.
+    final mascote = Theme.of(context).brightness == Brightness.light
+        ? _assetLight
+        : _asset;
     final direction = Directionality.of(context);
 
     Size measure(String text) {
@@ -482,7 +494,7 @@ class _Headline extends StatelessWidget {
             child: SizedBox(
               height: blockHeight,
               child: Image.asset(
-                _asset,
+                mascote,
                 fit: BoxFit.contain,
                 alignment: Alignment.centerRight,
                 filterQuality: FilterQuality.medium,

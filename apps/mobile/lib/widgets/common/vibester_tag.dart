@@ -58,8 +58,8 @@ class VibesterTag extends StatelessWidget {
         null,
       ),
       TagTone.outline => (Colors.transparent, colors.textMuted, colors.outline),
-      TagTone.brand => (colors.ambar, Colors.white, null),
-      TagTone.live => (colors.live, Colors.white, null),
+      TagTone.brand => (colors.ambar, colors.onAmbar, null),
+      TagTone.live => (colors.live, colors.onFill(colors.live), null),
     };
 
     final dot = dotColor ?? (tone == TagTone.live ? foreground : null);
