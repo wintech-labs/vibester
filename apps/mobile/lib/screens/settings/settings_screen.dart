@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:mobile/providers/notification/notification_provider.dart';
+import 'package:mobile/providers/preferences/preferences_provider.dart';
 import 'package:mobile/providers/safety/block_provider.dart';
 import 'package:mobile/providers/theme/theme_provider.dart';
 import 'package:mobile/providers/user/user_provider.dart';
@@ -26,6 +27,10 @@ import 'package:provider/provider.dart';
 /// Fora desta versão: "Ghost vibe" (switch só local, sem backend) e "Vibester
 /// Club" (assinatura por checkout externo, fora das regras de compra da App
 /// Store). O `PaymentService` continua no código para quando voltar.
+///
+/// PREFERÊNCIAS: grupo entre Aparência e Ajuda e privacidade, com dois
+/// interruptores ligados de fábrica — "Deslizar para trocar de aba" e "Barras
+/// flutuantes". Quem respeita cada um está listado no `PreferencesProvider`.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -96,6 +101,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final themeProvider = context.watch<ThemeProvider>();
+    final preferences = context.watch<PreferencesProvider>();
 
     return Scaffold(
       backgroundColor: colors.noturno,
@@ -128,12 +134,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ? Icons.dark_mode_outlined
                   : Icons.light_mode_outlined,
               label: themeProvider.isDarkMode ? 'Modo escuro' : 'Modo claro',
-              trailing: Switch(
+              // PREFERÊNCIAS: o `Switch` que ficava aqui virou o
+              // `_SettingsSwitch` no fim do arquivo, sem mudar nada no
+              // desenho — os três interruptores da tela usam o mesmo, então
+              // não há como um sair diferente do outro.
+              trailing: _SettingsSwitch(
                 value: themeProvider.isDarkMode,
-                activeThumbColor: colors.onAmbar,
-                activeTrackColor: colors.ambar,
-                inactiveTrackColor: colors.surface,
                 onChanged: (_) => themeProvider.toggleTheme(),
+              ),
+            ),
+
+            // PREFERÊNCIAS: mesma anatomia da linha do tema, mas o texto é
+            // fixo — o interruptor sozinho diz se está ligado ou não.
+            const SettingsGroupLabel('PREFERÊNCIAS'),
+            SettingsRow(
+              icon: Icons.swipe_outlined,
+              label: 'Deslizar para trocar de aba',
+              trailing: _SettingsSwitch(
+                value: preferences.swipeBetweenTabs,
+                onChanged: preferences.setSwipeBetweenTabs,
+              ),
+            ),
+            SettingsRow(
+              icon: Icons.call_to_action_outlined,
+              label: 'Barras flutuantes',
+              trailing: _SettingsSwitch(
+                value: preferences.floatingBars,
+                onChanged: preferences.setFloatingBars,
               ),
             ),
 
@@ -205,6 +232,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// PREFERÊNCIAS: interruptor dos Ajustes.
+///
+/// É exatamente o `Switch` que a linha do modo escuro já usava — âmbar ligado,
+/// superfície desligado —, tirado de lá para as linhas novas reaproveitarem
+/// em vez de copiar as cores.
+class _SettingsSwitch extends StatelessWidget {
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _SettingsSwitch({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+
+    return Switch(
+      value: value,
+      activeThumbColor: colors.onAmbar,
+      activeTrackColor: colors.ambar,
+      inactiveTrackColor: colors.surface,
+      onChanged: onChanged,
     );
   }
 }

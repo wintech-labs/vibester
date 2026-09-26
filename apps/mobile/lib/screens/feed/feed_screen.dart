@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:mobile/providers/feed/publication_list_provider.dart';
+import 'package:mobile/providers/preferences/preferences_provider.dart';
 import 'package:mobile/providers/safety/block_provider.dart';
 import 'package:mobile/providers/user/user_provider.dart';
 import 'package:mobile/models/interaction/interaction_event_model.dart';
@@ -102,6 +103,12 @@ class FeedScreenState extends State<FeedScreen> with RouteAware {
     // Só o scroll do próprio feed; carrossel de mídia dentro do card não conta.
     if (notification.depth != 0) return false;
 
+    // BARRAS FLUTUANTES: desligado nos Ajustes, o cabeçalho não some nem
+    // volta com a rolagem — fica fixo (ver o `visible` no `build`). O `false`
+    // mantém a notificação subindo até a Home, que decide o dock pela mesma
+    // preferência.
+    if (!context.read<PreferencesProvider>().floatingBars) return false;
+
     if (notification.metrics.pixels <= _headerHeight) {
       _setHeaderVisible(true);
       return false;
@@ -135,16 +142,34 @@ class FeedScreenState extends State<FeedScreen> with RouteAware {
     }
   }
 
+  /// CORREÇÃO: chamado pelo `RouteObserver` no momento da inscrição (feita no
+  /// `didChangeDependencies` acima), ou seja, quando este feed passa a existir.
+  ///
+  /// Garante que um feed recém-montado nasça "sem nada por cima". O tracker
+  /// vive acima desta tela e sobrevive a ela: sair da conta pelos Ajustes —
+  /// uma rota empilhada sobre a Home — deixava a flag de "coberto" ligada,
+  /// porque a Home era removida da pilha sem nunca receber o `didPopNext`, e
+  /// o feed da próxima sessão nascia sem medir.
+  @override
+  void didPush() => _tracker?.setCoveredByRoute(false);
+
   /// Uma rota foi empilhada por cima — perfil do autor, detalhe do post.
   ///
   /// A partir daqui o `Overlay` para de pintar esta tela e o detector de
   /// visibilidade dos cards congela no último valor. Sem este aviso, o post
   /// que estava na tela acumularia atenção durante a visita à outra tela.
+  ///
+  /// CORREÇÃO: esta tela agora só informa se há algo por cima dela — não se
+  /// ela está visível. O feed vive dentro da casca da Home, e as rotas abertas
+  /// a partir de HOJE, BUSCA ou VOCÊ também caem aqui, porque a rota por baixo
+  /// é a mesma. Antes, fechar um evento aberto em HOJE chamava o antigo
+  /// `resumeSurface` e religava a medição do feed, que nem estava na tela.
+  /// Se o feed é a aba atual é o outro interruptor, e ele é da Home.
   @override
-  void didPushNext() => _tracker?.pauseSurface();
+  void didPushNext() => _tracker?.setCoveredByRoute(true);
 
   @override
-  void didPopNext() => _tracker?.resumeSurface();
+  void didPopNext() => _tracker?.setCoveredByRoute(false);
 
   @override
   void dispose() {
@@ -160,6 +185,11 @@ class FeedScreenState extends State<FeedScreen> with RouteAware {
     final provider = context.watch<PublicationListProvider>();
     // Bloqueio some na hora; o feed-service tira os posts do feed em seguida.
     final blocks = context.watch<BlockProvider>();
+    // BARRAS FLUTUANTES: `select` para reconstruir só quando esta preferência
+    // muda.
+    final floatingBars = context.select<PreferencesProvider, bool>(
+      (p) => p.floatingBars,
+    );
     final publications = provider.publications
         .where((p) => !blocks.isBlocked(p.authorId))
         .toList();
@@ -300,7 +330,8 @@ class FeedScreenState extends State<FeedScreen> with RouteAware {
               left: 0,
               right: 0,
               child: _FeedHeader(
-                visible: _headerVisible,
+                // BARRAS FLUTUANTES: desligado, sempre à vista.
+                visible: _headerVisible || !floatingBars,
                 height: _headerHeight,
                 logo: Theme.of(context).brightness == Brightness.light
                     ? _logoLight

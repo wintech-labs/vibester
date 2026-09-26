@@ -6,6 +6,7 @@ import 'package:mobile/providers/feed/publication_list_provider.dart';
 import 'package:mobile/providers/notification/notification_provider.dart';
 import 'package:mobile/providers/place/nearby_provider.dart';
 import 'package:mobile/providers/place/place_list_provider.dart';
+import 'package:mobile/providers/preferences/preferences_provider.dart';
 import 'package:mobile/providers/safety/block_provider.dart';
 import 'package:mobile/providers/theme/theme_provider.dart';
 import 'package:mobile/providers/user/user_provider.dart';
@@ -79,6 +80,7 @@ Future<void> pumpScreen(
   ThemeMode themeMode = ThemeMode.dark,
   BlockProvider? blocks,
   RouteFactory? onGenerateRoute,
+  PreferencesProvider? preferences,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -97,6 +99,13 @@ Future<void> pumpScreen(
         ChangeNotifierProvider(create: (_) => NotificationProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider(themeMode)),
         ChangeNotifierProvider.value(value: blocks ?? BlockProvider()),
+        // PREFERÊNCIAS: os Ajustes leem este provider; sem ele toda tela que
+        // o usa cairia em `ProviderNotFoundException`. Por padrão nasce com
+        // os valores de fábrica; um teste que precisa de outro estado passa
+        // o seu em [preferences].
+        ChangeNotifierProvider.value(
+          value: preferences ?? PreferencesProvider(),
+        ),
         ChangeNotifierProvider.value(value: userProvider),
       ],
       child: MaterialApp(

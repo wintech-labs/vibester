@@ -147,13 +147,18 @@ void main() {
   });
 
   group('superfície fora da frente do usuário', () {
+    // CORREÇÃO: os testes deste grupo usavam `pauseSurface`/`resumeSurface`,
+    // que viraram `setFeedTabActive` (troca de aba, dono: a Home) e
+    // `setCoveredByRoute` (rota por cima, dono: o feed). O que cada teste
+    // prova continua igual; só a chamada mudou para o interruptor certo.
+
     test('tempo em outra aba não conta como atenção', () {
       tracker.onVisibilityChanged(item, 1.0);
       agora = agora.add(const Duration(seconds: 2));
 
-      tracker.pauseSurface();
+      tracker.setFeedTabActive(false);
       agora = agora.add(const Duration(minutes: 3));
-      tracker.resumeSurface();
+      tracker.setFeedTabActive(true);
 
       agora = agora.add(const Duration(seconds: 2));
       tracker.onVisibilityChanged(item, 0.0);
@@ -162,7 +167,7 @@ void main() {
     });
 
     test('nenhum episódio começa com a superfície pausada', () {
-      tracker.pauseSurface();
+      tracker.setFeedTabActive(false);
       mostrarPor(const Duration(seconds: 3));
 
       expect(tracker.bufferedEvents, isEmpty);
@@ -205,7 +210,7 @@ void main() {
       agora = agora.add(const Duration(seconds: 2));
 
       // Sai do feed pela navbar, e só então manda o app para segundo plano.
-      tracker.pauseSurface();
+      tracker.setFeedTabActive(false);
       tracker.onAppPaused();
 
       agora = agora.add(const Duration(minutes: 10));
@@ -214,11 +219,71 @@ void main() {
 
       // O usuário voltou para a aba de busca, não para o feed: nada do que
       // ficou congelado atrás dela pode contar como atenção.
-      tracker.resumeSurface();
+      tracker.setFeedTabActive(true);
       agora = agora.add(const Duration(seconds: 3));
       tracker.onVisibilityChanged(item, 0.0);
 
       expect(tracker.bufferedEvents.single.dwellMs, 3000);
+    });
+
+    // CORREÇÃO: os três testes abaixo cobrem os dois interruptores juntos —
+    // exatamente onde o booleano único errava.
+
+    test('tela aberta por cima do feed pausa, e fechá-la retoma', () {
+      tracker.onVisibilityChanged(item, 1.0);
+      agora = agora.add(const Duration(seconds: 2));
+
+      // Perfil do autor aberto a partir do próprio feed.
+      tracker.setCoveredByRoute(true);
+      agora = agora.add(const Duration(minutes: 1));
+      tracker.setCoveredByRoute(false);
+
+      agora = agora.add(const Duration(seconds: 2));
+      tracker.onVisibilityChanged(item, 0.0);
+
+      expect(tracker.bufferedEvents.single.dwellMs, 4000);
+    });
+
+    test('fechar uma tela aberta a partir de outra aba não religa o feed', () {
+      tracker.onVisibilityChanged(item, 1.0);
+      agora = agora.add(const Duration(seconds: 2));
+
+      // Sai do feed pela navbar e, em HOJE, abre um evento. A rota do feed é a
+      // mesma da casca, então o feed também recebe o aviso de "coberto".
+      tracker.setFeedTabActive(false);
+      tracker.setCoveredByRoute(true);
+      agora = agora.add(const Duration(minutes: 1));
+
+      // Fecha o evento, mas continua em HOJE. Com o booleano único, este
+      // passo religava a medição e os 3 minutos seguintes contavam como
+      // atenção num post que ninguém estava vendo.
+      tracker.setCoveredByRoute(false);
+      agora = agora.add(const Duration(minutes: 3));
+
+      // Só agora volta ao feed.
+      tracker.setFeedTabActive(true);
+      agora = agora.add(const Duration(seconds: 2));
+      tracker.onVisibilityChanged(item, 0.0);
+
+      expect(tracker.bufferedEvents.single.dwellMs, 4000);
+    });
+
+    test('voltar à aba do feed com uma tela ainda por cima não retoma', () {
+      tracker.onVisibilityChanged(item, 1.0);
+      agora = agora.add(const Duration(seconds: 2));
+
+      // Cada interruptor só libera o seu motivo: a aba voltar a ser o feed não
+      // passa por cima de uma rota que ainda está cobrindo a tela.
+      tracker.setFeedTabActive(false);
+      tracker.setCoveredByRoute(true);
+      tracker.setFeedTabActive(true);
+      agora = agora.add(const Duration(minutes: 2));
+
+      tracker.setCoveredByRoute(false);
+      agora = agora.add(const Duration(seconds: 2));
+      tracker.onVisibilityChanged(item, 0.0);
+
+      expect(tracker.bufferedEvents.single.dwellMs, 4000);
     });
 
     test('voltar do segundo plano começa uma sessão nova', () {

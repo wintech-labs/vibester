@@ -24,6 +24,10 @@ export 'package:mobile/widgets/navigation/navbar_item.dart'
 /// continua sendo a casca (`HomeScreen`), e nenhuma rota, provider ou service
 /// foi tocado para isto existir.
 ///
+/// **Arraste.** Quando a casca permite trocar de destino arrastando a tela,
+/// ela passa [dragPosition] e o destaque acompanha o dedo. A navbar continua
+/// sem decidir nada: só desenha a posição que recebe.
+///
 /// **Layout.** Tudo cabe dentro da altura da barra, inclusive a ação central:
 /// ela ocupa um vão no meio da fileira em vez de ficar apoiada sobre a borda.
 /// Além de ser o que o produto pediu, isso elimina de vez a possibilidade de
@@ -56,6 +60,20 @@ class VibesterNavbar extends StatefulWidget {
   /// uma intenção, não coreografar deslocamento e opacidade.
   final bool visible;
 
+  /// ARRASTE: posição contínua do destaque enquanto o usuário arrasta a tela
+  /// entre destinos (0 = primeiro destino, 1.5 = no meio do caminho entre o
+  /// segundo e o terceiro). `null` quando não há arraste.
+  ///
+  /// Com valor, o destaque segue essa posição quadro a quadro — ele anda
+  /// junto com o dedo em vez de esperar a troca acontecer para então pular.
+  /// Quando volta a `null` (a página assentou), o destaque assenta no
+  /// [currentIndex] com a mesma mola do toque. Opcional: sem ele, a navbar
+  /// se comporta exatamente como antes.
+  ///
+  /// `ValueNotifier` e não `ValueListenable` só porque é o tipo que já chega
+  /// pelo import do material, sem um import de `foundation` a mais.
+  final ValueNotifier<double?>? dragPosition;
+
   const VibesterNavbar({
     super.key,
     required this.destinations,
@@ -65,6 +83,7 @@ class VibesterNavbar extends StatefulWidget {
     this.badgeIndex,
     this.badgeCount = 0,
     this.visible = true,
+    this.dragPosition,
   });
 
   @override
@@ -92,6 +111,8 @@ class _VibesterNavbarState extends State<VibesterNavbar>
   void initState() {
     super.initState();
 
+    widget.dragPosition?.addListener(_onDragPosition);
+
     // Um frame depois: a navbar entra sobre a primeira tela já desenhada.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -106,9 +127,30 @@ class _VibesterNavbarState extends State<VibesterNavbar>
   @override
   void didUpdateWidget(covariant VibesterNavbar old) {
     super.didUpdateWidget(old);
+
+    // ARRASTE: troca de fonte da posição (raro, mas sem isto a navbar
+    // continuaria ouvindo um notifier que ninguém mais atualiza).
+    if (widget.dragPosition != old.dragPosition) {
+      old.dragPosition?.removeListener(_onDragPosition);
+      widget.dragPosition?.addListener(_onDragPosition);
+    }
+
     if (widget.currentIndex == old.currentIndex) return;
 
-    final alvo = widget.currentIndex.toDouble();
+    // ARRASTE: no arraste o destino atual muda no meio do caminho (quando a
+    // página passa da metade). Nesse momento o destaque já está exatamente
+    // onde o dedo está; disparar a mola aqui o puxaria para o destino e o
+    // descolaria do dedo. Quem assenta o destaque é o fim do arraste.
+    if (widget.dragPosition?.value != null) return;
+
+    _springTo(widget.currentIndex.toDouble());
+  }
+
+  /// Leva o destaque até [alvo] com mola (ou direto, com movimento reduzido).
+  ///
+  /// ARRASTE: extraído do `didUpdateWidget` sem mudança, para o fim do
+  /// arraste assentar com a mesma mola do toque.
+  void _springTo(double alvo) {
     if (context.reduceMotion) {
       _indicator.value = alvo;
     } else {
@@ -118,8 +160,29 @@ class _VibesterNavbarState extends State<VibesterNavbar>
     }
   }
 
+  /// ARRASTE: nova posição vinda de fora.
+  ///
+  /// Durante o arraste o destaque é colado no dedo — `value` interrompe a
+  /// mola que estivesse rodando e limita a posição aos mesmos limites do
+  /// controller. No fim (`null`), assenta no destino atual; normalmente a
+  /// distância que falta é zero ou quase, porque a página já encaixou.
+  ///
+  /// Seguir o dedo vale mesmo com movimento reduzido: não é animação
+  /// decorativa, é resposta direta ao gesto.
+  void _onDragPosition() {
+    final posicao = widget.dragPosition?.value;
+
+    if (posicao == null) {
+      _springTo(widget.currentIndex.toDouble());
+      return;
+    }
+
+    _indicator.value = posicao;
+  }
+
   @override
   void dispose() {
+    widget.dragPosition?.removeListener(_onDragPosition);
     _indicator.dispose();
     _entrance.dispose();
     super.dispose();

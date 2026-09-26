@@ -15,12 +15,14 @@ import 'package:mobile/providers/feed/publication_list_provider.dart';
 import 'package:mobile/providers/notification/notification_provider.dart';
 import 'package:mobile/providers/place/nearby_provider.dart';
 import 'package:mobile/providers/place/place_list_provider.dart';
+import 'package:mobile/providers/preferences/preferences_provider.dart';
 import 'package:mobile/providers/safety/block_provider.dart';
 import 'package:mobile/providers/theme/theme_provider.dart';
 import 'package:mobile/providers/user/user_provider.dart';
 import 'package:mobile/routes/app_routes.dart';
 import 'package:mobile/routes/route_observer.dart';
 import 'package:mobile/service/interaction/interaction_tracker.dart';
+import 'package:mobile/service/preferences/preferences_service.dart';
 import 'package:mobile/service/theme/theme_service.dart';
 import 'package:mobile/service/user/interests_storage.dart';
 import 'package:mobile/theme/app_theme.dart';
@@ -115,11 +117,16 @@ void main() async {
     ApiClient.token = savedUser!.token;
   }
   final initialThemeMode = await ThemeService.loadThemeMode();
+  // PREFERÊNCIAS: lidas antes da primeira tela pelo mesmo motivo do tema —
+  // o app já nasce com a escolha do usuário, sem abrir no padrão e trocar um
+  // quadro depois.
+  final initialPreferences = await PreferencesService.load();
   runApp(
     MyApp(
       savedUser: savedUser,
       etapaPendente: etapaPendente,
       initialThemeMode: initialThemeMode,
+      initialPreferences: initialPreferences,
       sessaoExpirada: sessaoExpirada,
     ),
   );
@@ -128,6 +135,9 @@ void main() async {
 class MyApp extends StatefulWidget {
   final UserModel? savedUser;
   final ThemeMode initialThemeMode;
+
+  /// PREFERÊNCIAS: escolhas dos Ajustes já lidas do aparelho no boot.
+  final AppPreferences initialPreferences;
 
   /// Passo do cadastro deixado pela metade, ou `null` se não há.
   final EtapaCadastro? etapaPendente;
@@ -141,6 +151,7 @@ class MyApp extends StatefulWidget {
     this.savedUser,
     this.etapaPendente,
     required this.initialThemeMode,
+    this.initialPreferences = const AppPreferences(),
     this.sessaoExpirada = false,
   });
 
@@ -169,6 +180,10 @@ class _MyAppState extends State<MyApp> {
   late final ThemeProvider _themeProvider;
   late final BlockProvider _blockProvider;
 
+  /// PREFERÊNCIAS: campo do State pelo mesmo motivo dos providers acima.
+  /// Criado no `build`, voltaria ao estado lido no boot a cada reconstrução.
+  late final PreferencesProvider _preferencesProvider;
+
   /// Telemetria do feed. Vive no State pelo mesmo motivo dos providers acima:
   /// guarda as impressões abertas e o buffer de envio, e seria zerada a cada
   /// reconstrução se nascesse no `build`.
@@ -184,6 +199,7 @@ class _MyAppState extends State<MyApp> {
     _notificationProvider = NotificationProvider();
     _themeProvider = ThemeProvider(widget.initialThemeMode);
     _blockProvider = BlockProvider();
+    _preferencesProvider = PreferencesProvider(widget.initialPreferences);
     _interactionTracker = InteractionTracker();
 
     // O fim da sessão é a parte mais valiosa do dado — é o que fez a pessoa
@@ -362,6 +378,7 @@ class _MyAppState extends State<MyApp> {
     _notificationProvider.dispose();
     _themeProvider.dispose();
     _blockProvider.dispose();
+    _preferencesProvider.dispose();
     _lifecycleListener?.dispose();
     _interactionTracker.dispose();
     super.dispose();
@@ -379,6 +396,7 @@ class _MyAppState extends State<MyApp> {
         ChangeNotifierProvider.value(value: _notificationProvider),
         ChangeNotifierProvider.value(value: _themeProvider),
         ChangeNotifierProvider.value(value: _blockProvider),
+        ChangeNotifierProvider.value(value: _preferencesProvider),
         // Provider simples, não ChangeNotifier: telemetria nunca redesenha tela.
         Provider<InteractionTracker>.value(value: _interactionTracker),
       ],

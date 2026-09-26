@@ -14,6 +14,15 @@ class PublicationModel {
   final List<PostMedia> media;
   final String description;
   final String? location;
+
+  /// Id do estabelecimento marcado no post, par do nome em [location].
+  ///
+  /// LOCAL CLICÁVEL: o feed-service sempre mandou este id
+  /// (`establishment_id`), e o `FeedItemModel` já o lia — mas ele se perdia
+  /// aqui, na conversão para o modelo que o card desenha, que só guardava o
+  /// nome. Sem o id não havia para onde levar o toque no local. Nulo em post
+  /// sem local marcado e em post antigo que só tenha o nome.
+  final String? establishmentId;
   final DateTime publicatedAt;
   final int likes;
   final bool isLiked;
@@ -27,6 +36,7 @@ class PublicationModel {
     this.media = const [],
     required this.description,
     this.location,
+    this.establishmentId,
     required this.publicatedAt,
     this.likes = 0,
     this.isLiked = false,
@@ -41,6 +51,7 @@ class PublicationModel {
     List<PostMedia>? media,
     String? description,
     String? location,
+    String? establishmentId,
     DateTime? publicatedAt,
     int? likes,
     bool? isLiked,
@@ -54,6 +65,7 @@ class PublicationModel {
       media: media ?? this.media,
       description: description ?? this.description,
       location: location ?? this.location,
+      establishmentId: establishmentId ?? this.establishmentId,
       publicatedAt: publicatedAt ?? this.publicatedAt,
       likes: likes ?? this.likes,
       isLiked: isLiked ?? this.isLiked,
@@ -70,6 +82,8 @@ class PublicationModel {
       media: item.media,
       description: item.content ?? '',
       location: item.establishmentName,
+      // LOCAL CLICÁVEL: repassa o id que o item de feed já trazia.
+      establishmentId: item.establishmentId,
       publicatedAt: item.createdAt,
       likes: item.totalLikes,
       isLiked: item.isLiked,
@@ -92,6 +106,10 @@ class PublicationModel {
       media: media,
       description: json['caption'] as String? ?? '',
       location: json['establishmentName'] as String?,
+      // LOCAL CLICÁVEL: mesmo campo que o app envia ao criar o post. Se a
+      // resposta não o devolver, o post recém-publicado mostra o local sem
+      // toque até o próximo refresh, quando passa a vir pelo feed.
+      establishmentId: json['establishmentId'] as String?,
       publicatedAt:
           DateTime.tryParse(json['createdAt'] as String? ?? '')?.toLocal() ??
           DateTime.now(),

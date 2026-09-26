@@ -11,7 +11,6 @@ import 'package:mobile/utils/relative_time.dart';
 import 'package:mobile/utils/username.dart';
 import 'package:mobile/widgets/cards/feed/delete_post_action.dart';
 import 'package:mobile/widgets/common/vibester_image.dart';
-import 'package:mobile/widgets/common/vibester_tag.dart';
 import 'package:mobile/widgets/indicators/like_indicator.dart';
 import 'package:mobile/widgets/media/post_media_carousel.dart';
 import 'package:mobile/widgets/motion/double_tap_like.dart';
@@ -37,6 +36,17 @@ import 'package:provider/provider.dart';
 /// O selo de local não é enfeite: quando o post veio de um estabelecimento,
 /// ele é o atalho para a página dele — é o que costura a rede social à
 /// descoberta, que é a razão de o Vibester ter as duas coisas.
+///
+/// LOCAL: o selo saiu de cima da foto e foi para uma linha própria logo
+/// abaixo da linha de autoria (avatar + @), antes da mídia. Sobre a foto ele
+/// disputava espaço com a imagem e com as bolinhas do carrossel; aqui ele é
+/// lido junto de quem postou — "quem" e "onde" no mesmo bloco — e a foto
+/// fica limpa.
+///
+/// LOCAL CLICÁVEL: tocar no local abre a página do estabelecimento — agora o
+/// modelo guarda o id dele ([PublicationModel.establishmentId]), que antes se
+/// perdia na conversão do item de feed. Post com o nome mas sem o id (antigo,
+/// ou recém-publicado se a API não devolver o id) mostra o local sem toque.
 class PublicationCard extends StatelessWidget {
   final PublicationModel publication;
 
@@ -83,7 +93,28 @@ class PublicationCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _AuthorLine(publication: publication, onAuthorTap: onAuthorTap),
-          const SizedBox(height: AppSpacing.md),
+
+          // LOCAL: logo abaixo do avatar e do @, alinhado à margem esquerda.
+          //
+          // LOCAL CLICÁVEL: o respiro acima da linha (xs) e parte do de baixo
+          // (sm) passaram para dentro dela, como padding — viram área de
+          // toque em vez de espaço morto. O espaçamento visto na tela é o
+          // mesmo de antes: xs acima, sm + xs = md abaixo.
+          if (publication.location != null &&
+              publication.location!.isNotEmpty) ...[
+            _PlaceLine(
+              place: publication.location!,
+              onTap: publication.establishmentId == null
+                  ? null
+                  : () => Navigator.pushNamed(
+                      context,
+                      AppRoutes.placeDetail,
+                      arguments: publication.establishmentId,
+                    ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+          ] else
+            const SizedBox(height: AppSpacing.md),
 
           Transform.rotate(
             angle: _tilt,
@@ -105,36 +136,22 @@ class PublicationCard extends StatelessWidget {
                 ),
                 child: AspectRatio(
                   aspectRatio: 4 / 5,
+                  // LOCAL: aqui havia um `Stack` com a mídia e o selo de local
+                  // posicionado no canto inferior esquerdo. Com o selo fora
+                  // da foto, sobrou só a mídia, e o `Stack` saiu junto.
                   child: DoubleTapLike(
                     onLike: () => _likeFromPhoto(context),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        // Foto, vídeo ou carrossel — na ordem de `media`. As
-                        // bolinhas ficam na base e o contador no topo.
-                        PostMediaCarousel(
-                          media: publication.media.isNotEmpty
-                              ? publication.media
-                              : [
-                                  if (publication.publicationImage.isNotEmpty)
-                                    PostMedia.image(
-                                      publication.publicationImage,
-                                    ),
-                                ],
-                          grain: true,
-                          counterOnTop: true,
-                        ),
-                        if (publication.location != null &&
-                            publication.location!.isNotEmpty)
-                          Positioned(
-                            left: AppSpacing.md,
-                            bottom: AppSpacing.md,
-                            child: VibesterTag(
-                              publication.location!,
-                              icon: Icons.place_outlined,
-                            ),
-                          ),
-                      ],
+                    // Foto, vídeo ou carrossel — na ordem de `media`. As
+                    // bolinhas ficam na base e o contador no topo.
+                    child: PostMediaCarousel(
+                      media: publication.media.isNotEmpty
+                          ? publication.media
+                          : [
+                              if (publication.publicationImage.isNotEmpty)
+                                PostMedia.image(publication.publicationImage),
+                            ],
+                      grain: true,
+                      counterOnTop: true,
                     ),
                   ),
                 ),
@@ -164,6 +181,83 @@ class PublicationCard extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// LOCAL: linha do lugar marcado, abaixo da linha de autoria.
+///
+/// Só ícone e texto, sem caixa em volta: o pino em `brasa` é o que marca a
+/// linha como "lugar", e o nome vai em DM Mono caixa alta no tom apagado de
+/// metadado. A primeira versão tinha o contorno fino do `VibesterTag`
+/// `outline`, e a borda pesava demais logo abaixo do avatar — saiu.
+///
+/// Não usa o `VibesterTag` por um motivo: o texto dele não quebra nem corta,
+/// e nome de estabelecimento pode ser comprido ("Espaço Cultural e
+/// Gastronômico ..."). Sobre a foto isso passava despercebido; numa linha da
+/// largura do card, estouraria a tela. Aqui o nome corta com reticências.
+class _PlaceLine extends StatelessWidget {
+  final String place;
+
+  /// LOCAL CLICÁVEL: abre a página do estabelecimento. Nulo quando o post não
+  /// traz o id — a linha aparece igual, só sem toque.
+  final VoidCallback? onTap;
+
+  const _PlaceLine({required this.place, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+
+    // Sem caixa, sem padding lateral: o pino começa na mesma margem do
+    // avatar, em vez de ficar recuado pelo respiro de uma borda que não
+    // existe mais.
+    //
+    // LOCAL CLICÁVEL: o padding vertical é o respiro que antes ficava fora da
+    // linha (ver o `build` do card); aqui dentro ele engorda a área de toque
+    // sem mudar nada do que se vê.
+    final line = Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xs, bottom: AppSpacing.sm),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.place_outlined, size: 11, color: colors.brasa),
+          const SizedBox(width: AppSpacing.xs + 1),
+          Flexible(
+            child: Text(
+              place.toUpperCase(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: context.typography.monoTag.copyWith(
+                color: colors.textMuted,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (onTap == null) {
+      return Semantics(
+        label: 'Local: $place',
+        excludeSemantics: true,
+        child: line,
+      );
+    }
+
+    // LOCAL CLICÁVEL: mesmo `VibesterPressable` do autor logo acima — mesma
+    // compressão no toque —, sem sublinhado nem cor de link: o pino em
+    // `brasa` já diz que ali tem um lugar, como o avatar diz que ali tem uma
+    // pessoa.
+    return Semantics(
+      button: true,
+      label: 'Abrir $place',
+      excludeSemantics: true,
+      child: VibesterPressable(
+        borderRadius: AppRadius.smAll,
+        onTap: onTap,
+        child: line,
       ),
     );
   }

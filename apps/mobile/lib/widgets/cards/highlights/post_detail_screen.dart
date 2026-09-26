@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:mobile/models/highlights/highlight_model.dart';
 import 'package:mobile/models/safety/report_reason.dart';
+import 'package:mobile/providers/preferences/preferences_provider.dart';
 import 'package:mobile/providers/user/user_provider.dart';
 import 'package:mobile/service/posts/post_service.dart';
 import 'package:mobile/theme/app_motion.dart';
@@ -40,6 +41,10 @@ class PostDetailArgs {
 }
 
 /// Feed dos posts de um perfil (ou de um lugar), aberto a partir da grade.
+///
+/// BARRAS FLUTUANTES: o cabeçalho com o voltar some ao descer e volta ao
+/// subir só com "Barras flutuantes" ligado nos Ajustes (o padrão). Desligado,
+/// fica fixo.
 ///
 /// Cada post mantém o formato do detalhe de antes — mídia 4:5, curtida,
 /// legenda e data —, só que empilhados na ordem da grade. A tela abre já no
@@ -127,6 +132,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     if (notification.metrics.axis != Axis.vertical) return false;
     // Só o scroll da lista; o carrossel de mídia dentro do post não conta.
     if (notification.depth != 0) return false;
+
+    // BARRAS FLUTUANTES: desligado nos Ajustes, o cabeçalho com o voltar fica
+    // fixo — a rolagem não o esconde (ver o `visible` no `build`).
+    if (!context.read<PreferencesProvider>().floatingBars) return false;
 
     final metrics = notification.metrics;
     if (metrics.pixels <= metrics.minScrollExtent + _headerHeight) {
@@ -309,6 +318,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final viewerId = context.select<UserProvider, String?>(
       (p) => p.user?.accountId,
     );
+    // BARRAS FLUTUANTES: `select` para reconstruir só quando esta preferência
+    // muda.
+    final floatingBars = context.select<PreferencesProvider, bool>(
+      (p) => p.floatingBars,
+    );
 
     // "Meus Posts" só quando todos são da conta logada; na grade de outro
     // perfil ou de um lugar, "Posts".
@@ -368,7 +382,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               left: 0,
               right: 0,
               child: _PostsHeader(
-                visible: _headerVisible,
+                // BARRAS FLUTUANTES: desligado, sempre à vista.
+                visible: _headerVisible || !floatingBars,
                 height: _headerHeight,
                 title: meus ? 'Meus Posts' : 'Posts',
               ),

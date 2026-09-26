@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/models/feed/publication_model.dart';
+import 'package:mobile/routes/app_routes.dart';
 import 'package:mobile/theme/app_spacing.dart';
 import 'package:mobile/widgets/cards/feed/publication_card.dart';
+import 'package:mobile/widgets/motion/double_tap_like.dart';
 
 import '../helpers/pump_app.dart';
 
@@ -91,5 +93,134 @@ void main() {
     expect(menu, findsOneWidget);
     final folga = TestScreens.medium.width - tester.getTopRight(menu).dx;
     expect(folga, lessThan(AppSpacing.screen + 16));
+  });
+
+  // LOCAL: o lugar marcado saiu de cima da foto e foi para baixo da linha de
+  // autoria (avatar + @).
+  group('local marcado', () {
+    PublicationModel comLocal(String local, {String? establishmentId}) =>
+        PublicationModel(
+          id: 'post-3',
+          authorId: 'outra-conta',
+          autor: 'ana',
+          autorProfileImage: '',
+          publicationImage: '',
+          description: '',
+          location: local,
+          establishmentId: establishmentId,
+          publicatedAt: DateTime(2026, 9, 1),
+        );
+
+    testWidgets('fica abaixo do autor e acima da foto, fora dela', (
+      tester,
+    ) async {
+      await pumpScreen(
+        tester,
+        Scaffold(body: PublicationCard(publication: comLocal('Bar do Zé'))),
+        user: fakeUser(),
+      );
+
+      final local = find.text('BAR DO ZÉ');
+      expect(local, findsOneWidget);
+
+      // Não é mais desenhado dentro da mídia.
+      expect(
+        find.descendant(of: find.byType(DoubleTapLike), matching: local),
+        findsNothing,
+      );
+
+      // Abaixo do avatar...
+      final avatar = find.byType(ClipOval).first;
+      expect(
+        tester.getTopLeft(local).dy,
+        greaterThanOrEqualTo(tester.getBottomLeft(avatar).dy),
+      );
+
+      // ...e acima da foto.
+      final foto = find.byType(DoubleTapLike);
+      expect(
+        tester.getBottomLeft(local).dy,
+        lessThan(tester.getTopLeft(foto).dy),
+      );
+    });
+
+    testWidgets('nome comprido corta em vez de estourar a tela pequena', (
+      tester,
+    ) async {
+      // O `pumpScreen` reprova o teste se houver estouro de layout.
+      await pumpScreen(
+        tester,
+        Scaffold(
+          body: PublicationCard(
+            publication: comLocal(
+              'Espaço Cultural e Gastronômico Recanto das Palmeiras de '
+              'Maringá e Região Metropolitana',
+            ),
+          ),
+        ),
+        user: fakeUser(),
+        size: TestScreens.small,
+      );
+
+      expect(find.byIcon(Icons.place_outlined), findsOneWidget);
+    });
+
+    // LOCAL CLICÁVEL
+    testWidgets('tocar no local abre a página do estabelecimento', (
+      tester,
+    ) async {
+      RouteSettings? aberta;
+
+      await pumpScreen(
+        tester,
+        Scaffold(
+          body: PublicationCard(
+            publication: comLocal('Bar do Zé', establishmentId: 'est-9'),
+          ),
+        ),
+        user: fakeUser(),
+        onGenerateRoute: (settings) {
+          aberta = settings;
+          return MaterialPageRoute(builder: (_) => const SizedBox.shrink());
+        },
+      );
+
+      await tester.tap(find.text('BAR DO ZÉ'));
+      await tester.pump();
+
+      expect(aberta?.name, AppRoutes.placeDetail);
+      expect(aberta?.arguments, 'est-9');
+    });
+
+    testWidgets('sem o id do estabelecimento, o local não navega', (
+      tester,
+    ) async {
+      RouteSettings? aberta;
+
+      await pumpScreen(
+        tester,
+        Scaffold(body: PublicationCard(publication: comLocal('Bar do Zé'))),
+        user: fakeUser(),
+        onGenerateRoute: (settings) {
+          aberta = settings;
+          return MaterialPageRoute(builder: (_) => const SizedBox.shrink());
+        },
+      );
+
+      await tester.tap(find.text('BAR DO ZÉ'), warnIfMissed: false);
+      await tester.pump();
+
+      expect(aberta, isNull);
+    });
+
+    testWidgets('sem local, a linha não aparece', (tester) async {
+      await pumpScreen(
+        tester,
+        Scaffold(body: PublicationCard(publication: deOutraPessoa('ana'))),
+        user: fakeUser(),
+      );
+
+      expect(find.byIcon(Icons.place_outlined), findsNothing);
+    });
   });
 }

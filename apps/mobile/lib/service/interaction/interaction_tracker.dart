@@ -185,10 +185,35 @@ class InteractionTracker {
   /// São campos separados porque se combinam: voltar do segundo plano com o
   /// usuário parado na aba de busca não pode fazer o feed voltar a contar
   /// atenção. Um único booleano perdia exatamente esse caso.
+  ///
+  /// CORREÇÃO (navegação × telemetria) — a mesma lição valeu para a própria
+  /// "superfície", que era um campo só (`_surfaceOnScreen`) com **dois donos**
+  /// que não combinavam entre si: a casca da Home, que o desligava e religava
+  /// na troca de aba, e o próprio feed, que fazia o mesmo quando uma rota era
+  /// empilhada por cima dele. Um desfazia o que o outro tinha feito:
+  ///
+  /// * em HOJE, abrir um evento e voltar fazia o feed religar a flag, e os
+  ///   posts congelados atrás daquela aba acumulavam atenção que ninguém deu;
+  /// * voltar ao feed pelo botão voltar do Android não passava pelo único
+  ///   ponto da casca que religava a flag, e o feed ficava na tela sem medir.
+  ///
+  /// Agora são dois campos, um por motivo, cada um com um único dono. O feed
+  /// só mede com o app na frente **e** o feed na aba atual **e** nada por cima.
   bool _appForeground = true;
-  bool _surfaceOnScreen = true;
 
-  bool get _visible => _appForeground && _surfaceOnScreen;
+  /// O feed é a aba atual da navbar. Dono: a `HomeScreen`, pelo
+  /// [setFeedTabActive].
+  ///
+  /// Nasce verdadeiro porque o feed também pode ser montado fora da casca (a
+  /// rota `/feed`, testes de widget), e aí não existe aba a considerar.
+  bool _feedTabActive = true;
+
+  /// Há uma rota empilhada por cima do feed (perfil do autor, detalhe, um
+  /// evento aberto a partir de outra aba). Dono: a `FeedScreen`, pelo
+  /// [setCoveredByRoute].
+  bool _coveredByRoute = false;
+
+  bool get _visible => _appForeground && _feedTabActive && !_coveredByRoute;
 
   @visibleForTesting
   String get sessionId => _sessionId;
@@ -249,29 +274,43 @@ class InteractionTracker {
 
   // -------------------------------------------------------------- ciclo de vida
 
-  /// A superfície saiu da frente do usuário sem que o app saísse: troca de aba
-  /// da navbar, ou rota empilhada por cima.
+  /// A aba do feed passou (ou deixou de ser) a aba atual da navbar. Chamado
+  /// só pela `HomeScreen`, em toda troca de destino.
+  ///
+  /// Junto com [setCoveredByRoute], cobre a superfície saindo da frente do
+  /// usuário sem que o app saia: troca de aba da navbar, ou rota empilhada por
+  /// cima.
   ///
   /// Apenas **pausa** os episódios, não os fecha. O `VisibilityDetector` não é
   /// notificado nesses casos — os cards continuam montados, só não são
   /// pintados — e ele só dispara o callback quando a fração **muda**. Fechar
   /// aqui faria o episódio nunca reabrir na volta, porque a fração continuaria
   /// a mesma e nenhum callback viria.
-  void pauseSurface() {
-    if (_disposed) return;
+  ///
+  /// CORREÇÃO: o par antigo `pauseSurface`/`resumeSurface` virou dois setters,
+  /// um para cada motivo (ver [_feedTabActive] e [_coveredByRoute]). Quem
+  /// chama diz só o que mudou do lado dele; a decisão de medir ou não é sempre
+  /// a combinação dos dois, feita em [_visible]. Assim nenhum dos donos
+  /// consegue religar a contagem por cima de um motivo que é do outro.
+  void setFeedTabActive(bool active) {
+    if (_disposed || _feedTabActive == active) return;
 
     final estavaVisivel = _visible;
 
-    _surfaceOnScreen = false;
+    _feedTabActive = active;
     _applyVisibility(estavaVisivel);
   }
 
-  void resumeSurface() {
-    if (_disposed) return;
+  /// Uma rota foi empilhada por cima do feed ([covered] verdadeiro) ou a que
+  /// estava por cima saiu. Chamado só pela `FeedScreen`, pelo `RouteAware`.
+  ///
+  /// Mesma regra do [setFeedTabActive]: pausa os episódios, não os fecha.
+  void setCoveredByRoute(bool covered) {
+    if (_disposed || _coveredByRoute == covered) return;
 
     final estavaVisivel = _visible;
 
-    _surfaceOnScreen = true;
+    _coveredByRoute = covered;
     _applyVisibility(estavaVisivel);
   }
 
@@ -295,11 +334,12 @@ class InteractionTracker {
 
   /// O app foi para segundo plano.
   ///
-  /// Diferente de [pauseSurface], aqui os episódios são **fechados e enviados**:
-  /// o app pode nunca mais voltar, e o fim da sessão é justamente onde está a
-  /// informação mais valiosa — o que fez a pessoa sair. Os mesmos itens são
-  /// reabertos pausados, para que a volta retome a contagem sem depender de um
-  /// callback de visibilidade que não virá.
+  /// Diferente de [setFeedTabActive] e [setCoveredByRoute], aqui os episódios
+  /// são **fechados e enviados**: o app pode nunca mais voltar, e o fim da
+  /// sessão é justamente onde está a informação mais valiosa — o que fez a
+  /// pessoa sair. Os mesmos itens são reabertos pausados, para que a volta
+  /// retome a contagem sem depender de um callback de visibilidade que não
+  /// virá.
   void onAppPaused() {
     if (_disposed) return;
 
