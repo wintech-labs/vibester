@@ -99,7 +99,7 @@ describe("auth-service — senha, exclusão e suspensão (Postgres + Redis reais
     });
 
     it("exclui a conta do token, publica user.deleted e o login deixa de funcionar", async () => {
-        const { token } = JSON.parse((await login(OLD_PASSWORD)).payload);
+        const { accessToken: token } = JSON.parse((await login(OLD_PASSWORD)).payload);
 
         const wrong = await app.inject({
             method: "DELETE", url: "/account", payload: { password: "errada123" },
