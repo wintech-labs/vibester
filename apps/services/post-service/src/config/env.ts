@@ -46,6 +46,14 @@ const envSchema = z.object({
     //           no primeiro minuto de deploy.
     //   off   - nem chama. Interruptor de emergência, sem deploy.
     POST_VALIDATION_MODE: z.enum(["block", "warn", "off"]).default("block"),
+
+    // Ocultar post quando a moderação de imagem do post-validation-service pede
+    // (`post.validation.rejected` com `action: "hide"`). O validador só
+    // recomenda; quem executa é este serviço, dono do ciclo de vida do post.
+    // A alavanca de rollout é o IMAGE_MODERATION_MODE do worker de validação
+    // (enquanto ele está em `observe`, nada chega aqui) — esta variável é o
+    // freio de emergência, sem deploy.
+    POST_MODERATION_HIDE: z.enum(["on", "off"]).default("on"),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -86,4 +94,5 @@ export const env = {
     post_validation_url: _env.POST_VALIDATION_URL.replace(/\/+$/, ""),
     post_validation_timeout_ms: _env.POST_VALIDATION_TIMEOUT_MS,
     post_validation_mode: _env.POST_VALIDATION_MODE,
+    post_moderation_hide: _env.POST_MODERATION_HIDE === "on",
 };

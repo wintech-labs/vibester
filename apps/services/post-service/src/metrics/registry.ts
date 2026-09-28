@@ -132,3 +132,17 @@ export const postValidationTotal = new client.Counter({
     labelNames: ["result"] as const,
     registers: [registry],
 });
+
+/**
+ * Posts ocultados pela moderação de imagem, por desfecho.
+ *
+ * `result`: hidden | already_deleted | not_found | disabled. `disabled` sobe
+ * quando o validador pede ocultação com POST_MODERATION_HIDE=off — é o sinal de
+ * que o freio de emergência está puxado.
+ */
+export const postsModerationHiddenTotal = new client.Counter({
+    name: "posts_moderation_hidden_total",
+    help: "Pedidos de ocultação de post pela moderação, por desfecho",
+    labelNames: ["result"] as const,
+    registers: [registry],
+});

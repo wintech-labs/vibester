@@ -68,6 +68,11 @@ spec:
             # virar publicacao recusada no primeiro minuto.
             - name: POST_VALIDATION_MODE
               value: "warn"
+            # Executa a ocultacao pedida pela moderacao de imagem. A alavanca de
+            # rollout e o IMAGE_MODERATION_MODE do worker de validacao (em
+            # `observe`, nenhum pedido chega aqui); isto e o freio de emergencia.
+            - name: POST_MODERATION_HIDE
+              value: "on"
           volumeMounts:
             - name: astra-bundle
               mountPath: /etc/astra

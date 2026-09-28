@@ -5,6 +5,13 @@ import { kafkaPublishTotal } from "../metrics/registry";
 export const POSTS_TOPIC = "posts";
 
 /**
+ * Publicado DEPOIS que um post é ocultado pela moderação. O notification-service
+ * avisa o autor a partir daqui — e não da recomendação do validador —, para que
+ * "sua publicação foi removida" só seja dito quando a remoção aconteceu.
+ */
+export const POST_MODERATION_HIDDEN_TOPIC = "post.moderation.hidden";
+
+/**
  * Único ponto de montagem do envelope de evento do serviço — todo publish deve
  * passar por aqui, nunca montar `{ eventId, eventType, occurredAt, data }` (ou
  * um payload plano, sem envelope) na mão dentro de um service.

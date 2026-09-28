@@ -22,5 +22,6 @@ vi.mock('../../src/config/env', () => ({
     post_validation_url: 'http://post-validation.test',
     post_validation_timeout_ms: 1000,
     post_validation_mode: 'block',
+    post_moderation_hide: true,
   },
 }));
