@@ -68,10 +68,17 @@ class NotificationCard extends StatelessWidget {
 
     // A miniatura também aparece no aviso de reprovação: é ela que diz ao
     // autor qual das publicações dele foi reprovada.
+    //
+    // Post apagado nunca mostra miniatura. Quando quem apagou foi a moderação
+    // de imagem, a foto é justamente o que foi removido — e sem isto ela
+    // voltaria a aparecer dentro da própria notificação (e nas curtidas
+    // antigas daquele post). O servidor já deixa de mandar a URL; isto cobre
+    // resposta antiga em cache e servidor de versão anterior.
     final hasThumbnail =
         (notification.tipo == 'like' ||
             notification.tipo == 'comment' ||
             _doSistema) &&
+        !notification.postApagado &&
         (notification.postImagemUrl?.isNotEmpty ?? false);
 
     // Duplicata do mesmo aviso é agrupada pelo servidor e chegaria como
