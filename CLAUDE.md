@@ -216,7 +216,8 @@ Entre as funcionalidades existentes estão:
   (contrato de upload e leitura em
   [`apps/services/post-service/docs/midias-no-post.md`](apps/services/post-service/docs/midias-no-post.md));
 - validação de conteúdo de postagem contra as diretrizes da comunidade
-  (veredito síncrono + revalidação assíncrona; ver
+  (texto: veredito síncrono + revalidação assíncrona; imagem: moderação
+  assíncrona pela API gratuita da OpenAI, com ocultação nos casos graves; ver
   [`apps/services/post-validation-service/CLAUDE.md`](apps/services/post-validation-service/CLAUDE.md));
 - feed;
 - coleta dos sinais implícitos de quem lê o feed (impressão, tempo de atenção,

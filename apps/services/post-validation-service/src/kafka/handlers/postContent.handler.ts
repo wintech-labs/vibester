@@ -1,6 +1,8 @@
 import { ValidationService } from "../../services/validation.service";
 import { publishValidationRejected } from "../producer";
-import type { ValidationInput } from "../../types/validation.types";
+import type { ValidationInput, ValidationIssue } from "../../types/validation.types";
+import type { ImageModerationService } from "../../moderation/image-moderation.service";
+import type { ModerationAction } from "../../moderation/types";
 
 /**
  * Envelope do post-service: `{ eventId, eventType, occurredAt, data }`. Payload
@@ -46,6 +48,21 @@ export interface HandlerResult {
     /** `false` quando a mensagem não é para este handler ou está malformada. */
     processed: boolean;
     valid?: boolean;
+    /** Presente quando uma rejeição foi publicada. */
+    action?: "notify" | "hide";
+}
+
+export interface ImageModerationDeps {
+    service: ImageModerationService;
+    /** Modo efetivo (`env.image_moderation_effective.mode`), já sem o "off". */
+    mode: "observe" | "enforce";
+}
+
+export interface HandlerDeps {
+    /** Ausente quando a moderação de imagem está desligada. */
+    imageModeration?: ImageModerationDeps;
+    /** `heartbeat` do kafkajs, repassado para o processamento longo de imagem. */
+    heartbeat?: () => Promise<void>;
 }
 
 /**
@@ -65,7 +82,8 @@ export interface HandlerResult {
  */
 export async function handlePostContentEvent(
     raw: string,
-    validationService: ValidationService
+    validationService: ValidationService,
+    deps: HandlerDeps = {},
 ): Promise<HandlerResult> {
     let parsed: unknown;
 
@@ -111,16 +129,47 @@ export async function handlePostContentEvent(
         postId,
     });
 
-    if (result.valid) {
+    // Imagem só no post novo: `post.content.updated` troca a legenda e não
+    // carrega mídia. Em `observe`, a moderação classifica, mede e audita, mas o
+    // resultado não entra na decisão — é o modo de calibrar sem afetar ninguém.
+    let imageIssues: ValidationIssue[] = [];
+    let imageAction: ModerationAction = "allow";
+
+    if (deps.imageModeration && eventType !== "post.content.updated") {
+        const outcome = await deps.imageModeration.service.moderatePost({
+            postId,
+            authorId,
+            data,
+            heartbeat: deps.heartbeat,
+        });
+
+        if (deps.imageModeration.mode === "enforce") {
+            imageIssues = outcome.issues;
+            imageAction = outcome.action;
+        }
+    }
+
+    const issues = [...result.issues, ...imageIssues];
+
+    if (issues.length === 0) {
         return { processed: true, valid: true };
     }
+
+    // Só imagem grave pede ocultação. Achado de texto continua sendo aviso: o
+    // caminho síncrono já barra texto antes de publicar (POST_VALIDATION_MODE).
+    const action = imageAction === "hide" ? "hide" : "notify";
 
     await publishValidationRejected({
         postId,
         authorId,
-        issues: result.issues.map((issue) => ({ code: issue.code, field: issue.field })),
+        action,
+        issues: issues.map((issue) => ({
+            code: issue.code,
+            field: issue.field,
+            ...(issue.mediaIndex !== undefined ? { mediaIndex: issue.mediaIndex } : {}),
+        })),
         validatedAt: new Date().toISOString(),
     });
 
-    return { processed: true, valid: false };
+    return { processed: true, valid: false, action };
 }

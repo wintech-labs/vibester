@@ -22,6 +22,15 @@ vi.mock("../../src/config/env", () => ({
         profanity_blocks: true,
         blocked_domains: ["dominio-da-env.example"],
         rate_limit_max: 120,
+        image_moderation_mode: "off",
+        image_moderation_effective: { mode: "off" },
+        openai_api_key: undefined,
+        openai_moderation_url: "https://api.openai.test/v1/moderations",
+        openai_moderation_model: "omni-moderation-latest",
+        media_public_url: "https://media.test",
+        image_moderation_timeout_ms: 15000,
+        image_moderation_concurrency: 3,
+        image_moderation_cache_ttl_seconds: 604800,
     },
 }));
 
@@ -35,6 +44,8 @@ vi.mock("../../src/config/redis", () => ({
     isRedisReady: () => true,
     getCachedVerdict: vi.fn(async () => null),
     setCachedVerdict: vi.fn(async () => undefined),
+    getCachedImageScores: vi.fn(async () => null),
+    setCachedImageScores: vi.fn(async () => undefined),
     connectRedis: vi.fn(async () => undefined),
     disconnectRedis: vi.fn(async () => undefined),
 }));

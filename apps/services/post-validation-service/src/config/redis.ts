@@ -1,7 +1,9 @@
+import { createHash } from "crypto";
 import Redis from "ioredis";
 import { env } from "./env";
 import { cacheResultTotal } from "../metrics/registry";
 import type { CachedVerdict } from "../types/validation.types";
+import type { CategoryScores } from "../moderation/types";
 
 /**
  * Cliente Redis do cache de veredito.
@@ -90,5 +92,36 @@ export async function disconnectRedis(): Promise<void> {
         await redis.quit();
     } catch {
         redis.disconnect();
+    }
+}
+
+/**
+ * Cache dos scores de moderação de imagem, por URL.
+ *
+ * Guarda o score bruto da API, não a decisão. Assim, mudar os limites em
+ * `src/moderation/policy.ts` vale na hora para imagens já vistas, sem esperar o
+ * TTL e sem pagar outra chamada — a política é reaplicada sobre o score
+ * guardado. As URLs de mídia são UUID e nunca mudam de conteúdo, o que torna a
+ * URL uma chave segura. Best-effort, como o resto: falha de Redis vira chamada
+ * à API, nunca erro.
+ */
+function imageScoresKey(url: string): string {
+    return `pv:imgscores:v1:${createHash("sha256").update(url).digest("hex")}`;
+}
+
+export async function getCachedImageScores(url: string): Promise<CategoryScores | null> {
+    try {
+        const cached = await redis.get(imageScoresKey(url));
+        return cached === null ? null : (JSON.parse(cached) as CategoryScores);
+    } catch {
+        return null;
+    }
+}
+
+export async function setCachedImageScores(url: string, scores: CategoryScores): Promise<void> {
+    try {
+        await redis.set(imageScoresKey(url), JSON.stringify(scores), "EX", env.image_moderation_cache_ttl_seconds);
+    } catch {
+        // Sem cache, a próxima reentrega chama a API de novo. Nada quebra.
     }
 }

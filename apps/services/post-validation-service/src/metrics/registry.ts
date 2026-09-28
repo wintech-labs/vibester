@@ -80,3 +80,47 @@ export const rateLimitExceededTotal = new client.Counter({
     labelNames: ["route"] as const,
     registers: [registry],
 });
+
+/**
+ * Moderação de imagem, por imagem classificada.
+ *
+ * `result`: allow | notify | hide | error. `cached`: se o score veio do Redis
+ * (sem chamada à API). Em `observe`, é esta métrica que mostra quanto seria
+ * ocultado se o modo virasse `enforce`.
+ */
+export const imageModerationTotal = new client.Counter({
+    name: "image_moderation_total",
+    help: "Imagens classificadas pela moderação, por resultado",
+    labelNames: ["result", "cached"] as const,
+    registers: [registry],
+});
+
+/** Mídias que não foram classificadas, e por quê (vídeo sem capa, URL de fora, acima do teto, sem tempo). */
+export const imageModerationSkippedTotal = new client.Counter({
+    name: "image_moderation_skipped_total",
+    help: "Mídias não classificadas, por motivo",
+    labelNames: ["reason"] as const,
+    registers: [registry],
+});
+
+/** Duração da chamada à API (inclui o download da imagem pela OpenAI). */
+export const imageModerationDuration = new client.Histogram({
+    name: "image_moderation_duration_seconds",
+    help: "Duração da chamada à API de moderação de imagem",
+    buckets: [0.25, 0.5, 1, 2, 4, 8, 15],
+    registers: [registry],
+});
+
+/**
+ * Distribuição dos scores por categoria. É o instrumento da calibragem: antes
+ * de ligar `enforce`, olhar quantas fotos reais caem acima de 0.5 e de 0.8 em
+ * `sexual` diz se os limites de `src/moderation/policy.ts` estão certos para o
+ * público do app.
+ */
+export const imageModerationScore = new client.Histogram({
+    name: "image_moderation_score",
+    help: "Score da API de moderação de imagem, por categoria",
+    labelNames: ["category"] as const,
+    buckets: [0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.8, 0.9, 0.95],
+    registers: [registry],
+});

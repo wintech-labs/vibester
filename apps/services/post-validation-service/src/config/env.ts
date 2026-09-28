@@ -55,6 +55,36 @@ const envSchema = z.object({
     BLOCKED_DOMAINS: z.string().optional(),
 
     RATE_LIMIT_MAX: z.coerce.number().default(120),
+
+    // --- Moderação de imagem (só o worker usa) ---
+    //
+    // off:     não classifica imagem.
+    // observe: classifica e mede (métricas + auditoria), mas não publica nada.
+    //          É o modo de calibragem: roda em posts reais sem afetar ninguém.
+    // enforce: publica post.validation.rejected com `action` — "hide" para o
+    //          post-service ocultar o post, "notify" para só avisar o autor.
+    IMAGE_MODERATION_MODE: z.enum(["off", "observe", "enforce"]).default("off"),
+
+    // API de moderação da OpenAI (gratuita). Sem chave, a moderação de imagem
+    // fica desligada mesmo com o modo ligado — ver `image_moderation_effective`.
+    OPENAI_API_KEY: z.string().optional(),
+    OPENAI_MODERATION_URL: z.string().url().default("https://api.openai.com/v1/moderations"),
+    OPENAI_MODERATION_MODEL: z.string().default("omni-moderation-latest"),
+
+    // Endereço público do bucket de mídia (o mesmo R2_PUBLIC_URL do post-service).
+    // Só URL que começa por aqui é enviada para classificação: um post nunca
+    // deveria ter mídia de outro lugar, e mandar URL arbitrária para um terceiro
+    // não é algo que este serviço deva fazer.
+    MEDIA_PUBLIC_URL: z.string().url().optional(),
+
+    // O worker não tem orçamento de 200ms: a OpenAI baixa a imagem antes de
+    // classificar, e isso pode levar alguns segundos.
+    IMAGE_MODERATION_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+    IMAGE_MODERATION_CONCURRENCY: z.coerce.number().int().positive().max(10).default(3),
+
+    // Scores ficam em cache por URL. As URLs de mídia são UUID e nunca mudam de
+    // conteúdo, então uma mensagem reentregue pelo Kafka não chama a API de novo.
+    IMAGE_MODERATION_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(7 * 24 * 60 * 60),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -86,4 +116,37 @@ export const env = {
         .map((domain) => domain.trim().toLowerCase())
         .filter((domain) => domain.length > 0),
     rate_limit_max: _env.RATE_LIMIT_MAX,
+    image_moderation_mode: _env.IMAGE_MODERATION_MODE,
+    image_moderation_effective: imageModerationEffective(),
+    openai_api_key: _env.OPENAI_API_KEY,
+    openai_moderation_url: _env.OPENAI_MODERATION_URL,
+    openai_moderation_model: _env.OPENAI_MODERATION_MODEL,
+    // Sem barra final: a checagem de prefixo compara com `${base}/`.
+    media_public_url: _env.MEDIA_PUBLIC_URL?.replace(/\/+$/, ""),
+    image_moderation_timeout_ms: _env.IMAGE_MODERATION_TIMEOUT_MS,
+    image_moderation_concurrency: _env.IMAGE_MODERATION_CONCURRENCY,
+    image_moderation_cache_ttl_seconds: _env.IMAGE_MODERATION_CACHE_TTL_SECONDS,
 };
+
+/**
+ * Modo que vale de fato. Ligar o modo sem a chave da OpenAI ou sem o endereço
+ * do bucket não pode derrubar o worker — o Secret é criado à mão e pode chegar
+ * incompleto. Nesse caso a moderação de imagem fica desligada, e o motivo sai
+ * no log de boot (`src/worker.ts`) para ninguém achar que está funcionando.
+ */
+function imageModerationEffective(): { mode: "off" | "observe" | "enforce"; reason?: string } {
+    if (_env.IMAGE_MODERATION_MODE === "off") {
+        return { mode: "off" };
+    }
+
+    const missing = [
+        !_env.OPENAI_API_KEY ? "OPENAI_API_KEY" : null,
+        !_env.MEDIA_PUBLIC_URL ? "MEDIA_PUBLIC_URL" : null,
+    ].filter(Boolean);
+
+    if (missing.length > 0) {
+        return { mode: "off", reason: `IMAGE_MODERATION_MODE=${_env.IMAGE_MODERATION_MODE}, mas falta ${missing.join(" e ")}` };
+    }
+
+    return { mode: _env.IMAGE_MODERATION_MODE };
+}
