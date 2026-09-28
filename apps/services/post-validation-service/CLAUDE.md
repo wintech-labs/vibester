@@ -22,6 +22,7 @@ Este serviço é a barreira preventiva. Ele responde a uma pergunta só, e respo
 - aplicar as regras da comunidade sobre o texto de uma postagem: vazio, tamanho, linguagem proibida, links e spam;
 - devolver um veredito síncrono com motivo, rápido o bastante para ficar no caminho da criação do post;
 - revalidar de forma assíncrona o que já foi publicado, consumindo `posts` do Kafka;
+- classificar as imagens de cada post novo com a API de moderação da OpenAI e recomendar ocultação nas categorias graves (ver "Moderação de imagem");
 - publicar `post.validation.rejected` quando a revalidação reprova, para o `notification-service` avisar o autor;
 - manter a trilha de auditoria de toda validação realizada.
 
@@ -55,11 +56,74 @@ Três coisas que essa integração **não** faz, e que precisam estar claras:
 
 1. **Indisponibilidade deixa passar.** Se este serviço não responde no orçamento, o `post-service` publica assim mesmo. É deliberado: barrar publicação quando o filtro cai transformaria um serviço auxiliar em ponto único de falha do Vibester. O worker é o que segura o outro lado — conteúdo que escapa numa queda é pego na revalidação. A política está em `PostService.enforceValidation`, não numa env var, porque é decisão de produto.
 2. **Chamador sem token passa.** A rota daqui exige JWT e o `post-service` repassa o header `Authorization` que recebeu. O app mobile anexa o header em toda chamada, então na prática cobre o tráfego real; um script ou painel que chame o `post-service` direto, sem token, não é validado.
-3. **Post já publicado e reprovado não é removido.** O worker só *avisa* (`post.validation.rejected` → notificação ao autor). "Remover sozinho? esconder? mandar para fila humana?" é decisão de produto e moderação, não de quem escreve o filtro.
+3. **Post já publicado com problema de texto não é removido.** Para texto, o worker só *avisa* (`action: "notify"`). Quem remove post publicado é a **moderação de imagem**, e só nas categorias graves (ver "Moderação de imagem").
 
-Não "resolva" o item 3 fazendo este serviço chamar o `post-service` para deletar. Isso inverteria a dependência — a validação passaria a comandar o ciclo de vida do post.
+Mesmo na remoção, este serviço **não chama o post-service**: ele publica a recomendação (`action: "hide"`) e o post-service, dono do ciclo de vida do post, decide executar. Fazer a validação deletar o post direto inverteria a dependência.
 
 **Comentários continuam sem validação.** `POST /posts/:postId/comments` não passa por aqui. É a lacuna mais óbvia que sobrou, e fechá-la é adicionar a chamada no `CommentService` do `post-service` — o contrato desta rota já serve, sem mudança aqui.
+
+---
+
+## Moderação de imagem
+
+No Vibester a mídia é obrigatória e a legenda é opcional: num post típico, o conteúdo **é** a foto. O worker classifica cada imagem de `post.created` com a **API de moderação da OpenAI** (`omni-moderation-latest`), que é gratuita.
+
+### Fluxo
+
+```
+post.created → worker → para cada mídia (foto; de vídeo, a capa):
+    cache no Redis? → senão, POST /v1/moderations com a URL pública → score por categoria
+    → política (src/moderation/policy.ts) → allow | notify | hide
+  → action mais grave do post:
+      hide   → post.validation.rejected { action: "hide" } → post-service oculta
+               → post.deleted (feed-service tira das timelines) + post.moderation.hidden
+               → notification-service: "sua publicação foi removida porque…"
+      notify → post.validation.rejected { action: "notify" } → aviso ao autor, post segue no ar
+```
+
+### Decisões que não são óbvias
+
+1. **Uma imagem por chamada.** Com várias entradas, a API devolve um resultado combinado, e não daria para saber qual foto foi reprovada. O evento leva `mediaIndex`.
+2. **A imagem vai pela URL pública do R2**: a OpenAI baixa sozinha, e o worker não trafega bytes. Só URL que começa por `MEDIA_PUBLIC_URL` é enviada — o post-service já exige isso, e aqui é defesa em profundidade: este serviço não manda URL arbitrária para um terceiro.
+3. **Só conta categoria que a API avaliou na imagem** (`category_applied_input_types`). Ódio, assédio, ilícito e conteúdo sexual com menores são só de texto; o score deles numa entrada de imagem é ruído, e a política não o vê.
+4. **O cache guarda o score, não a decisão.** Mudar os limites de `policy.ts` vale na hora para imagens já vistas, sem nova chamada. URL de mídia é UUID e não muda de conteúdo, então reentrega do Kafka não paga a checagem de novo.
+5. **Falha da API deixa passar.** 429, 5xx, timeout e rede ganham até 2 novas tentativas (1 s e 3 s; o `Retry-After` do 429 tem precedência). 4xx não é tentado de novo. E há um **orçamento de 45 s por post**: a partição `posts` tem um consumidor só, e um post preso numa API lenta seguraria todos os de trás.
+6. **`heartbeat` do Kafka no meio do processamento.** Dez imagens com novas tentativas passam dos 30 s do `sessionTimeout`; sem heartbeat, o Kafka tiraria o worker do grupo e reentregaria a mesma mensagem, em laço.
+7. **Automutilação nunca oculta e nunca é tratada como infração.** O aviso é de acolhimento, com o CVV (188) — ver o notification-service.
+
+### Política (ponto de partida, a calibrar)
+
+| Categoria da API | Ação | Por quê |
+|---|---|---|
+| `sexual` ≥ 0.8 | ocultar | |
+| `sexual` 0.5–0.8 | avisar | foto de festa com roupa curta marca `sexual` médio — num app de vida noturna, ocultar aqui seria falso positivo em massa |
+| `violence/graphic` ≥ 0.8 / ≥ 0.5 | ocultar / avisar | |
+| `violence` ≥ 0.8 | avisar | nunca oculta: uma luta de boxe num bar é evento |
+| `self-harm*` ≥ 0.5 | avisar (apoio) | ver item 7 acima |
+
+### Modos (`IMAGE_MODERATION_MODE`)
+
+| Modo | Efeito |
+|---|---|
+| `off` | não classifica (padrão do código) |
+| `observe` | classifica, mede e audita, **sem publicar nada** — padrão do manifest |
+| `enforce` | publica a rejeição com `action` |
+
+**Rollout:** subir em `observe`, olhar `image_moderation_score{category="sexual"}` em posts reais por 1–2 semanas, ajustar `policy.ts` e só então virar `enforce` em `k8s/deployment-worker.yaml`. No post-service, `POST_MODERATION_HIDE=off` é o freio de emergência da ocultação.
+
+### O que fica de fora
+
+- **Conteúdo sexual envolvendo menores em imagem**: a API só avalia isso em texto. O padrão para esse caso é comparar com banco de material conhecido — a Cloudflare oferece de graça (CSAM Scanning Tool) para sites atrás dela, se as fotos saírem por domínio próprio proxiado. Não configurado; precisa de teste com R2.
+- **Símbolos de ódio e drogas em imagem**: a API não avalia; continua dependendo de denúncia.
+- **Vídeo inteiro**: só a capa. Classificar o vídeo exigiria extrair quadros (ffmpeg) no worker.
+- **Janela de exposição**: a foto fica no ar alguns segundos. Segurar o post fora do feed até aprovar exigiria um estado "pendente" no post-service e no feed-service.
+- **Contestação**: o post fica marcado `is_deleted` no Cassandra, então restaurar é possível — mas não há fluxo para isso.
+
+### Privacidade e limites
+
+- **As fotos vão para a OpenAI.** Isso precisa constar na política de privacidade (`/privacidade` da landing page) antes de ligar `observe`.
+- Plano gratuito: **250 requisições/min** (cerca de 360 mil por dia). Se imagem conta no limite de 10 mil tokens/min do plano gratuito, a documentação não diz — o modo `observe` mostra.
+- Métricas: `image_moderation_total{result,cached}`, `image_moderation_skipped_total{reason}`, `image_moderation_duration_seconds`, `image_moderation_score{category}`. Auditoria: uma linha `audit: "post-validation-image"` por imagem, com URL, scores e decisão.
 
 ---
 
@@ -84,7 +148,7 @@ Ainda assim, três números para a mesma regra é dívida: o dia em que o app su
 Seja honesto sobre o alcance ao mexer aqui:
 
 - **Não detecta conteúdo malicioso em link.** Saber para onde uma URL aponta exige chamada de rede, e o orçamento da rota é 200ms. O que se faz é o decidível sem I/O: esquema, formato, domínio em lista, encurtador, punycode, IP cru, credencial embutida. Um domínio novo de phishing passa até alguém colocá-lo em `BLOCKED_DOMAINS`. O encaixe natural para resolver isso é uma checagem de reputação (Safe Browsing e equivalentes) **no worker**, onde não há orçamento de latência — nunca na rota síncrona.
-- **Não valida mídia.** Nenhum byte de imagem ou vídeo passa por aqui. O upload vai direto para o R2 via URL pré-assinada e o `post-service` não vê o binário — então nudez e violência em foto continuam sem filtro em todo o Vibester.
+- **Imagem é checada depois de publicada, não antes.** A moderação de imagem roda no worker: a foto fica no ar os segundos entre a publicação e o fim da checagem. Vídeo só tem a capa checada, e a API não avalia em imagem símbolos de ódio, drogas nem conteúdo sexual envolvendo menores (ver "Moderação de imagem").
 - **Não entende contexto.** Xingamento direcionado a uma pessoa e a mesma palavra em tom de brincadeira são idênticos para uma regex. Termos cujo sentido depende de contexto foram deixados fora da blocklist de propósito (ver `src/rules/data/blocklist.ts`); eles são trabalho da denúncia manual.
 - **Não é irreversível.** A blocklist tem falso positivo e falso negativo. As métricas por código existem para medir os dois.
 
@@ -97,6 +161,7 @@ Seja honesto sobre o alcance ao mexer aqui:
 - Kafka (`kafkajs`) — no modo worker, consumidor de `posts` e produtor em `post.validation.rejected`. No modo api o produtor conecta mas a rota não publica.
 - `zod` para env (`src/config/env.ts`) e payload (`src/schema/validation.schema.ts`).
 - `prom-client` para métricas em `/metrics` (`src/metrics/registry.ts`, única fonte — não crie `Counter` solto em outro arquivo).
+- **API de moderação da OpenAI** (só o worker), via `fetch` nativo em `src/moderation/openai.moderator.ts`, sem SDK. Ver "Moderação de imagem".
 - **Sem banco de dados.** Sem Cassandra, sem Prisma, sem migration.
 - Vitest: unit em `src/**/__tests__`, rota em `tests/integration`. Nenhum teste precisa de infra.
 
@@ -230,8 +295,10 @@ Toda variável é validada por Zod em `src/config/env.ts` (`process.exit(1)` se 
 O CI cria tudo que está no repositório (Deployments e Service), mas **não o Secret**: segredo não vive no git, e nenhum workflow do monorepo cria Secret. Antes do primeiro deploy, alguém com acesso ao cluster precisa criar:
 
 ```bash
-kubectl create secret generic post-validation-service-secret   --from-literal=JWT_SECRET='<o mesmo JWT_SECRET do auth-service>'   --from-literal=KAFKA_BROKERS='<os mesmos brokers dos outros serviços>'
+kubectl create secret generic post-validation-service-secret --from-literal=JWT_SECRET='<o mesmo JWT_SECRET do auth-service>' --from-literal=KAFKA_BROKERS='<os mesmos brokers dos outros serviços>' --from-literal=OPENAI_API_KEY='<chave da API da OpenAI>' --from-literal=MEDIA_PUBLIC_URL='<o mesmo R2_PUBLIC_URL do post-service>'
 ```
+
+`OPENAI_API_KEY` e `MEDIA_PUBLIC_URL` só são usados pelo worker, para a moderação de imagem. Se faltarem, o worker sobe normalmente, com a moderação de imagem desligada e o motivo no log de boot (`Moderação de imagem desligada`).
 
 `REDIS_URL` não entra no Secret: vem do ConfigMap `redis-env`, que já existe no cluster (`apps/services/k8s/redis/configmap.yaml`). Sem o Secret, os pods ficam em `CreateContainerConfigError` e o `rollout status` do CI estoura o timeout.
 
@@ -243,7 +310,7 @@ O `JWT_SECRET` precisa ser **idêntico** ao do auth-service — é ele que assin
 
 O worker publica `post.validation.rejected` no envelope `{ eventId, eventType, occurredAt, data }` — o mesmo que o `post-service` usa. **Isso não é estética**: o `notification-service` desembrulha com `unwrapEventData`, que procura exatamente `eventType` + `data`. Publicar payload solto faria o handler não achar `postId` e descartar a notificação em silêncio (foi o bug que o `envelope.ts` de lá existe para consertar).
 
-Do outro lado, `notification-service/src/kafka/handlers/postValidationRejected.handler.ts` traduz cada código em texto pt-BR e grava uma notificação do tipo `post_rejected`. O evento carrega só o **código**, nunca o termo casado — a notificação não pode virar oráculo da blocklist.
+Do outro lado, `notification-service/src/kafka/handlers/postValidationRejected.handler.ts` traduz cada código em texto pt-BR e grava uma notificação do tipo `post_rejected` — **só quando `action` é `notify`**. Com `action: "hide"` ele não faz nada: o aviso "foi removida" sai de `post.moderation.hidden`, que o post-service publica depois de ocultar de fato. O evento carrega só o **código** (e `mediaIndex`), nunca o termo casado nem o score — a notificação não pode virar oráculo do filtro.
 
 ---
 

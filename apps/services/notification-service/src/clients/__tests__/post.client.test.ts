@@ -58,6 +58,23 @@ describe("PostClient.getPost", () => {
         expect(result?.caption).toBe("Publicação removida");
     });
 
+    /**
+     * Quando quem apagou foi a moderação de imagem, a foto é o que foi
+     * removido. Devolver a URL faria ela voltar como miniatura em toda
+     * notificação daquele post, inclusive nas curtidas antigas.
+     */
+    it("does not return the image of a deleted post", async () => {
+        (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+            ok: true,
+            json: async () => ({ postId: "post-1", imageUrls: ["https://cdn/removida.jpg"], caption: "x", isDeleted: true }),
+        });
+
+        const result = await client.getPost("post-1");
+
+        expect(result?.imageUrl).toBe("");
+        expect(result?.isDeleted).toBe(true);
+    });
+
     it("returns null when response.ok is false", async () => {
         (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false });
 

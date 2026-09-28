@@ -33,8 +33,18 @@ export async function disconnectProducer(): Promise<void> {
 export interface PostValidationRejectedData {
     postId: string;
     authorId: string;
-    /** Só `code` e `field`: o consumidor monta a mensagem que mostra ao usuário. */
-    issues: Pick<ValidationIssue, "code" | "field">[];
+    /**
+     * O que este serviço recomenda fazer com o post:
+     * - "notify": só avisar o autor (todo achado de texto, e imagem menos grave);
+     * - "hide":   ocultar o post (imagem grave). Quem executa é o post-service,
+     *             dono do ciclo de vida do post; este serviço só julga conteúdo.
+     */
+    action: "notify" | "hide";
+    /**
+     * Só `code`, `field` e `mediaIndex`: o consumidor monta a mensagem que
+     * mostra ao usuário, e nunca recebe o termo casado nem o score.
+     */
+    issues: Pick<ValidationIssue, "code" | "field" | "mediaIndex">[];
     validatedAt: string;
 }
 

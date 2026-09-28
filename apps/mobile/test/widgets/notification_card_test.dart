@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/models/notification/notification_model.dart';
 import 'package:mobile/widgets/cards/notification/notification_card.dart';
+import 'package:mobile/widgets/common/vibester_image.dart';
 
 import '../helpers/pump_app.dart';
 
@@ -9,6 +10,8 @@ NotificationModel _notificacao({
   String conteudo = '',
   int outrosCount = 0,
   String? atorNome,
+  String? postImagemUrl,
+  bool postApagado = false,
 }) {
   return NotificationModel(
     id: 'n-1',
@@ -20,8 +23,14 @@ NotificationModel _notificacao({
     lida: false,
     criadoEm: DateTime.now().subtract(const Duration(minutes: 5)),
     atorNome: atorNome,
+    postImagemUrl: postImagemUrl,
+    postApagado: postApagado,
   );
 }
+
+Finder _miniatura(String url) => find.byWidgetPredicate(
+  (widget) => widget is VibesterImage && widget.source == url,
+);
 
 Finder _texto(String trecho) => find.textContaining(trecho, findRichText: true);
 
@@ -114,6 +123,59 @@ void main() {
       );
 
       expect(_texto('e mais 2'), findsOneWidget);
+    });
+  });
+
+  group('NotificationCard — miniatura de post apagado', () {
+    const foto = 'https://media.test/posts/autor/foto.jpg';
+
+    testWidgets('mostra a miniatura do post reprovado que continua no ar', (tester) async {
+      await pumpComponent(
+        tester,
+        NotificationCard(
+          notification: _notificacao(
+            tipo: 'post_rejected',
+            conteudo: 'aviso',
+            postImagemUrl: foto,
+          ),
+        ),
+      );
+
+      expect(_miniatura(foto), findsOneWidget);
+    });
+
+    /// Quando quem apagou foi a moderação de imagem, a foto é o que foi
+    /// removido — ela não pode voltar dentro da própria notificação.
+    testWidgets('nunca mostra a miniatura de post apagado', (tester) async {
+      await pumpComponent(
+        tester,
+        NotificationCard(
+          notification: _notificacao(
+            tipo: 'post_rejected',
+            conteudo: 'Sua publicação foi removida.',
+            postImagemUrl: foto,
+            postApagado: true,
+          ),
+        ),
+      );
+
+      expect(_miniatura(foto), findsNothing);
+    });
+
+    testWidgets('vale tambem para curtida antiga de post apagado', (tester) async {
+      await pumpComponent(
+        tester,
+        NotificationCard(
+          notification: _notificacao(
+            tipo: 'like',
+            atorNome: 'Ana',
+            postImagemUrl: foto,
+            postApagado: true,
+          ),
+        ),
+      );
+
+      expect(_miniatura(foto), findsNothing);
     });
   });
 }

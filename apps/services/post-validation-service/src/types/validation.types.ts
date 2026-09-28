@@ -18,14 +18,23 @@ export enum ValidationCode {
     TOO_MANY_LINKS = "TOO_MANY_LINKS",
     SPAM_SUSPECTED = "SPAM_SUSPECTED",
     TOO_MANY_TAGS = "TOO_MANY_TAGS",
+
+    // Imagem (só no caminho assíncrono — ver src/moderation/). A rota síncrona
+    // nunca vê mídia, então estes códigos só aparecem em post.validation.rejected.
+    IMAGE_SEXUAL = "IMAGE_SEXUAL",
+    IMAGE_GRAPHIC_VIOLENCE = "IMAGE_GRAPHIC_VIOLENCE",
+    IMAGE_VIOLENCE = "IMAGE_VIOLENCE",
+    IMAGE_SELF_HARM = "IMAGE_SELF_HARM",
 }
 
 export interface ValidationIssue {
     code: ValidationCode;
-    /** Campo do payload que motivou a rejeição (`content` ou `tags`). */
-    field: "content" | "tags";
+    /** Campo que motivou a rejeição: legenda, tags ou uma das mídias do post. */
+    field: "content" | "tags" | "media";
     /** Mensagem pronta para exibição, em pt-BR. Genérica por design. */
     message: string;
+    /** Só quando `field` é `media`: posição da mídia no post (0 = primeira). */
+    mediaIndex?: number;
 }
 
 /**

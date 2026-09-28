@@ -67,7 +67,7 @@ describe("handlePostContentEvent", () => {
             serviceReturning(false)
         );
 
-        expect(result).toEqual({ processed: true, valid: false });
+        expect(result).toEqual({ processed: true, valid: false, action: "notify" });
         expect(publishMock).toHaveBeenCalledTimes(1);
 
         const published = publishMock.mock.calls[0][0];
@@ -197,5 +197,126 @@ describe("handlePostContentEvent", () => {
         );
 
         expect(result.processed).toBe(true);
+    });
+});
+
+describe("handlePostContentEvent — moderação de imagem", () => {
+    const media = [{ url: "https://media.test/posts/autor/a.jpg", type: "IMAGE" }];
+
+    function imageServiceReturning(outcome: {
+        action: "allow" | "notify" | "hide";
+        issues: { code: ValidationCode; field: "media"; message: string; mediaIndex: number }[];
+    }) {
+        return {
+            moderatePost: vi.fn(async () => ({ ...outcome, classified: 1, failed: 0, skipped: 0 })),
+        };
+    }
+
+    const HIDE = {
+        action: "hide" as const,
+        issues: [{ code: ValidationCode.IMAGE_SEXUAL, field: "media" as const, message: "x", mediaIndex: 0 }],
+    };
+
+    beforeEach(() => {
+        publishMock.mockReset().mockResolvedValue(undefined);
+    });
+
+    it("em enforce, publica ocultacao quando a imagem e grave", async () => {
+        const image = imageServiceReturning(HIDE);
+
+        const result = await handlePostContentEvent(
+            envelope("post.created", { itemId: "post-1", authorId: "autor-1", content: "festa", media }),
+            serviceReturning(true),
+            { imageModeration: { service: image as never, mode: "enforce" } },
+        );
+
+        expect(result).toEqual({ processed: true, valid: false, action: "hide" });
+        expect(publishMock.mock.calls[0][0]).toMatchObject({
+            postId: "post-1",
+            action: "hide",
+            issues: [{ code: ValidationCode.IMAGE_SEXUAL, field: "media", mediaIndex: 0 }],
+        });
+    });
+
+    /**
+     * `observe` é o modo de calibragem: classifica em posts reais, mas nenhum
+     * autor é avisado e nenhum post é ocultado.
+     */
+    it("em observe, classifica mas nao publica nada", async () => {
+        const image = imageServiceReturning(HIDE);
+
+        const result = await handlePostContentEvent(
+            envelope("post.created", { itemId: "post-1", authorId: "autor-1", content: "festa", media }),
+            serviceReturning(true),
+            { imageModeration: { service: image as never, mode: "observe" } },
+        );
+
+        expect(image.moderatePost).toHaveBeenCalledTimes(1);
+        expect(result).toEqual({ processed: true, valid: true });
+        expect(publishMock).not.toHaveBeenCalled();
+    });
+
+    it("junta achado de texto e de imagem numa rejeicao so, com a acao mais grave", async () => {
+        const image = imageServiceReturning(HIDE);
+
+        await handlePostContentEvent(
+            envelope("post.created", { itemId: "post-1", authorId: "autor-1", content: "ruim", media }),
+            serviceReturning(false),
+            { imageModeration: { service: image as never, mode: "enforce" } },
+        );
+
+        const published = publishMock.mock.calls[0][0];
+        expect(published.action).toBe("hide");
+        expect(published.issues.map((i: { code: string }) => i.code)).toEqual([
+            ValidationCode.HATE_SPEECH,
+            ValidationCode.IMAGE_SEXUAL,
+        ]);
+    });
+
+    /** Texto nunca pede ocultação: o caminho síncrono já barra texto antes de publicar. */
+    it("achado so de texto continua sendo aviso", async () => {
+        const image = imageServiceReturning({ action: "allow", issues: [] });
+
+        await handlePostContentEvent(
+            envelope("post.created", { itemId: "post-1", authorId: "autor-1", content: "ruim", media }),
+            serviceReturning(false),
+            { imageModeration: { service: image as never, mode: "enforce" } },
+        );
+
+        expect(publishMock.mock.calls[0][0].action).toBe("notify");
+    });
+
+    it("nao classifica imagem em post.content.updated (so a legenda mudou)", async () => {
+        const image = imageServiceReturning(HIDE);
+
+        await handlePostContentEvent(
+            envelope("post.content.updated", { postId: "post-2", authorId: "autor-2", caption: "nova" }),
+            serviceReturning(true),
+            { imageModeration: { service: image as never, mode: "enforce" } },
+        );
+
+        expect(image.moderatePost).not.toHaveBeenCalled();
+    });
+
+    it("repassa o heartbeat do Kafka para a moderacao", async () => {
+        const image = imageServiceReturning({ action: "allow", issues: [] });
+        const heartbeat = vi.fn(async () => undefined);
+
+        await handlePostContentEvent(
+            envelope("post.created", { itemId: "post-1", authorId: "autor-1", content: "festa", media }),
+            serviceReturning(true),
+            { imageModeration: { service: image as never, mode: "enforce" }, heartbeat },
+        );
+
+        expect(image.moderatePost).toHaveBeenCalledWith(expect.objectContaining({ heartbeat }));
+    });
+
+    it("sem moderacao configurada, o comportamento de texto nao muda", async () => {
+        const result = await handlePostContentEvent(
+            envelope("post.created", { itemId: "post-1", authorId: "autor-1", content: "ruim", media }),
+            serviceReturning(false),
+        );
+
+        expect(result).toEqual({ processed: true, valid: false, action: "notify" });
     });
 });

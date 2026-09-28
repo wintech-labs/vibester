@@ -8,7 +8,7 @@ import {
 } from "../types/post.types";
 import { redis, cacheAside } from "../config/redis";
 import { HttpError } from "../errors/http.error";
-import { publishEvent, POSTS_TOPIC } from "../kafka/events";
+import { publishEvent, POSTS_TOPIC, POST_MODERATION_HIDDEN_TOPIC } from "../kafka/events";
 import { decodeCursor } from "../utils/cursor";
 import { toLegacyImageUrls } from "../utils/media";
 import { cacheInvalidationFailureTotal, postsCreatedTotal } from "../metrics/registry";
@@ -240,6 +240,52 @@ export class PostService {
             caption: input.caption,
             updatedAt,
         };
+    }
+
+    /**
+     * Oculta um post por decisão da moderação de imagem.
+     *
+     * Reaproveita o caminho do soft delete, e é isso que faz a ocultação chegar
+     * a todo lugar sem código novo: `post.deleted` já tira o post das timelines
+     * (feed-service) e desconta o contador do perfil (user-service). A linha
+     * continua no Cassandra marcada `is_deleted`, então restaurar depois (numa
+     * contestação) é possível.
+     *
+     * Diferente de `softDelete`: **sem checagem de dono** (quem pede é o
+     * sistema, não uma pessoa) e **idempotente** — post já apagado ou
+     * inexistente não é erro. O Kafka reentrega mensagens; lançar aqui criaria
+     * retry infinito para um post que o próprio autor já apagou.
+     *
+     * Só depois de ocultar publica `post.moderation.hidden`, que é de onde o
+     * notification-service tira o aviso "sua publicação foi removida".
+     */
+    async hideForModeration(
+        postId: string,
+        issues: { code: string; field?: string; mediaIndex?: number }[],
+    ): Promise<"hidden" | "already_deleted" | "not_found"> {
+        const post = await this.postRepository.findById(postId);
+
+        if (!post) { return "not_found"; }
+        if (post.isDeleted) { return "already_deleted"; }
+
+        await this.postRepository.softDeleteInAllViews(post);
+
+        await this.invalidatePostCaches(post.userId, post.establishmentId, postId);
+
+        await publishEvent(POSTS_TOPIC, postId, "post.deleted", {
+            authorId: post.userId,
+            postId,
+            createdAt: post.createdAt.toISOString(),
+        });
+
+        await publishEvent(POST_MODERATION_HIDDEN_TOPIC, postId, "post.moderation.hidden", {
+            postId,
+            authorId: post.userId,
+            issues,
+            hiddenAt: new Date().toISOString(),
+        });
+
+        return "hidden";
     }
 
     async softDelete(postId: string, currentUserId: string) {

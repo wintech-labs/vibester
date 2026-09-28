@@ -43,6 +43,13 @@ spec:
           env:
             - name: SERVICE_MODE
               value: "worker"
+            # Moderacao de imagem. `observe` classifica e mede sem afetar
+            # ninguem; so vira `enforce` depois de olhar image_moderation_score
+            # em posts reais. OPENAI_API_KEY e MEDIA_PUBLIC_URL vem do Secret —
+            # se faltarem, a moderacao fica desligada e o motivo sai no log de
+            # boot (o worker nao cai).
+            - name: IMAGE_MODERATION_MODE
+              value: "observe"
           resources:
             requests:
               cpu: "100m"

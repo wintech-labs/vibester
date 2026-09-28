@@ -9,6 +9,9 @@ import { registerSwagger } from "./config/swagger";
 import { producer } from "./kafka/producer";
 import { startConsumer, stopConsumer } from "./kafka/consumer";
 import { buildAccountContentDeletionService } from "./services/account-content-deletion.service";
+import { PostService } from "./services/post.service";
+import { PostRepository } from "./repository/post.repository";
+import { LikeRepository } from "./repository/like.repository";
 import { env } from "./config/env";
 import { registerErrorHandler } from "./errors/error.handler";
 import { registerCorsAndRateLimit, registerHttpMetrics } from "./plugins";
@@ -58,9 +61,14 @@ async function start() {
         await producer.connect();
         await getCassandraClient().connect();
 
-        // Único consumidor do serviço: apaga o conteúdo de contas excluídas
-        // (user.deleted, publicado pelo auth-service).
-        await startConsumer(buildAccountContentDeletionService());
+        // Consumidor do serviço: apaga o conteúdo de contas excluídas
+        // (user.deleted, do auth-service) e oculta post que a moderação de
+        // imagem pediu (post.validation.rejected com action "hide", do
+        // post-validation-service).
+        await startConsumer(
+            buildAccountContentDeletionService(),
+            new PostService(new PostRepository(), new LikeRepository()),
+        );
 
         await registerSwagger(app);
         await app.register(routes);

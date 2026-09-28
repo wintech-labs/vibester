@@ -136,4 +136,76 @@ describe("handlePostValidationRejectedEvent", () => {
         expect(content).toContain("excluí-la");
         expect(content).toContain("há links demais na publicação");
     });
+
+    /**
+     * O validador só recomenda ocultar; quem executa é o post-service. Avisar
+     * "foi removida" a partir da recomendação poderia afirmar algo que não
+     * aconteceu — o aviso de remoção sai de post.moderation.hidden.
+     */
+    it("ignores action=hide: the removal notice comes from post.moderation.hidden", async () => {
+        await handlePostValidationRejectedEvent(
+            envelope({
+                postId: "post-7",
+                authorId: "author-7",
+                action: "hide",
+                issues: [{ code: "IMAGE_SEXUAL", field: "media", mediaIndex: 0 }],
+            }),
+        );
+
+        expect(mockInsertNotification).not.toHaveBeenCalled();
+    });
+
+    it("explains an image issue that only warrants a notice", async () => {
+        await handlePostValidationRejectedEvent(
+            envelope({
+                postId: "post-8",
+                authorId: "author-8",
+                action: "notify",
+                issues: [{ code: "IMAGE_VIOLENCE", field: "media", mediaIndex: 1 }],
+            }),
+        );
+
+        const content = String(mockInsertNotification.mock.calls[0][4]);
+        expect(content).toContain("uma das imagens parece conter violência");
+        expect(content).toContain("excluí-la");
+    });
+
+    it("does not repeat the same reason when several photos share it", async () => {
+        await handlePostValidationRejectedEvent(
+            envelope({
+                postId: "post-9",
+                authorId: "author-9",
+                action: "notify",
+                issues: [
+                    { code: "IMAGE_VIOLENCE", field: "media", mediaIndex: 0 },
+                    { code: "IMAGE_VIOLENCE", field: "media", mediaIndex: 2 },
+                ],
+            }),
+        );
+
+        const content = String(mockInsertNotification.mock.calls[0][4]);
+        expect(content.match(/violência/g)).toHaveLength(1);
+    });
+
+    /**
+     * Automutilação é acolhimento, não infração: a mensagem não fala em
+     * diretrizes nem em excluir, e aponta o CVV.
+     */
+    it("replaces the notice with a support message on self-harm", async () => {
+        await handlePostValidationRejectedEvent(
+            envelope({
+                postId: "post-10",
+                authorId: "author-10",
+                action: "notify",
+                issues: [
+                    { code: "IMAGE_SELF_HARM", field: "media", mediaIndex: 0 },
+                    { code: "FORBIDDEN_LANGUAGE", field: "content" },
+                ],
+            }),
+        );
+
+        const content = String(mockInsertNotification.mock.calls[0][4]);
+        expect(content).toContain("188");
+        expect(content).not.toMatch(/diretrizes|excluí-la/);
+    });
 });

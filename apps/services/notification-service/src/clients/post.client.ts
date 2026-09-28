@@ -29,8 +29,12 @@ export class PostClient {
       if (!response.ok) return null;
 
       const data = (await response.json()) as PostResponse;
-      const imageUrl = data.imageUrls && data.imageUrls.length > 0 ? data.imageUrls[0] : "";
       const isDeleted = !!data.isDeleted;
+      // Post apagado não devolve miniatura. Quando quem apagou foi a moderação
+      // de imagem, a foto é justamente o que foi removido — e ela voltaria a
+      // aparecer em toda notificação daquele post, inclusive nas curtidas
+      // antigas. Para post que o próprio autor apagou vale o mesmo: ele sumiu.
+      const imageUrl = !isDeleted && data.imageUrls && data.imageUrls.length > 0 ? data.imageUrls[0] : "";
       const caption = isDeleted ? "Publicação removida" : (data.caption ?? "");
 
       return {

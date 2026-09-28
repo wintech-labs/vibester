@@ -5,6 +5,9 @@ import { startConsumer, stopConsumer, isConsumerRunning } from "./kafka/consumer
 import { connectProducer, disconnectProducer, isProducerConnected } from "./kafka/producer";
 import { connectRedis, disconnectRedis, isRedisReady } from "./config/redis";
 import { registry } from "./metrics/registry";
+import { OpenAIModerator } from "./moderation/openai.moderator";
+import { ImageModerationService } from "./moderation/image-moderation.service";
+import type { ImageModerationDeps } from "./kafka/handlers/postContent.handler";
 
 /**
  * Modo `worker`: revalida o que já foi publicado e avisa o autor quando reprova.
@@ -47,11 +50,20 @@ export async function startWorker(): Promise<void> {
     // com "produtor não conectado".
     await connectProducer();
 
-    await startConsumer(new ValidationService());
+    await startConsumer(new ValidationService(), buildImageModeration());
 
     await app.listen({ port: env.port, host: "0.0.0.0" });
 
     app.log.info({ port: env.port, mode: env.mode }, "Post Validation Service (worker) iniciado");
+
+    // O motivo vai no log de boot porque "ligado no YAML, desligado de fato"
+    // é justamente o estado que ninguém percebe sem olhar.
+    const image = env.image_moderation_effective;
+    if (image.reason) {
+        app.log.warn({ imageModeration: image.mode, reason: image.reason }, "Moderação de imagem desligada");
+    } else {
+        app.log.info({ imageModeration: image.mode }, "Moderação de imagem");
+    }
 
     const gracefulShutdown = async (signal: string) => {
         app.log.info({ signal }, "Iniciando shutdown gracioso");
@@ -74,3 +86,33 @@ export async function startWorker(): Promise<void> {
     process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
     process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 }
+
+/**
+ * Monta a moderação de imagem a partir do modo efetivo — `undefined` quando
+ * desligada (inclusive quando falta a chave ou o endereço do bucket; ver
+ * `imageModerationEffective` em src/config/env.ts).
+ */
+function buildImageModeration(): ImageModerationDeps | undefined {
+    const { mode } = env.image_moderation_effective;
+    if (mode === "off") {
+        return undefined;
+    }
+
+    const moderator = new OpenAIModerator({
+        apiKey: env.openai_api_key!,
+        url: env.openai_moderation_url,
+        model: env.openai_moderation_model,
+        timeoutMs: env.image_moderation_timeout_ms,
+    });
+
+    return {
+        mode,
+        service: new ImageModerationService({
+            moderator,
+            mediaPublicUrl: env.media_public_url!,
+            mode,
+            concurrency: env.image_moderation_concurrency,
+        }),
+    };
+}
+

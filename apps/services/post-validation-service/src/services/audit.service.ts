@@ -64,3 +64,39 @@ export function recordAudit(entry: AuditEntry): void {
         at: new Date().toISOString(),
     }));
 }
+
+export interface ImageAuditEntry {
+    postId: string;
+    authorId: string;
+    mediaIndex: number;
+    /**
+     * A URL entra no log, ao contrário da legenda: é o que a moderação precisa
+     * para abrir a imagem e conferir a decisão, e não é texto escrito pela
+     * pessoa (é `posts/<id do autor>/<uuid>.jpg`, de um post público).
+     */
+    url: string;
+    mode: "observe" | "enforce";
+    action: "allow" | "notify" | "hide" | "error";
+    /** Categorias com score relevante, arredondadas — o suficiente para recalibrar. */
+    scores?: Record<string, number>;
+    findings?: string[];
+    cached: boolean;
+    durationMs: number;
+    error?: string;
+}
+
+/**
+ * Trilha de auditoria da moderação de imagem — uma linha por imagem. Mesma
+ * ressalva de retenção de `recordAudit`: sem coletor de logs no cluster, a
+ * linha vive só no stdout do pod.
+ */
+export function recordImageAudit(entry: ImageAuditEntry): void {
+    console.log(JSON.stringify({
+        level: entry.action === "error" ? "warn" : "info",
+        audit: "post-validation-image",
+        service: "post-validation-service",
+        ...entry,
+        at: new Date().toISOString(),
+    }));
+}
+

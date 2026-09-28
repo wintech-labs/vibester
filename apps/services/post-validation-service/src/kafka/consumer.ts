@@ -1,6 +1,6 @@
 import { Consumer } from "kafkajs";
 import { kafka, POSTS_TOPIC } from "./client";
-import { handlePostContentEvent } from "./handlers/postContent.handler";
+import { handlePostContentEvent, type ImageModerationDeps } from "./handlers/postContent.handler";
 import { ValidationService } from "../services/validation.service";
 import { kafkaConsumedTotal } from "../metrics/registry";
 
@@ -17,7 +17,10 @@ export function isConsumerRunning(): boolean {
     return running;
 }
 
-export async function startConsumer(validationService: ValidationService): Promise<void> {
+export async function startConsumer(
+    validationService: ValidationService,
+    imageModeration?: ImageModerationDeps,
+): Promise<void> {
     consumer = kafka.consumer({
         groupId: GROUP_ID,
         sessionTimeout: 30000,
@@ -33,7 +36,7 @@ export async function startConsumer(validationService: ValidationService): Promi
     await consumer.subscribe({ topics: [POSTS_TOPIC], fromBeginning: false });
 
     await consumer.run({
-        eachMessage: async ({ topic, message }) => {
+        eachMessage: async ({ topic, message, heartbeat }) => {
             const value = message.value?.toString();
 
             if (!value) {
@@ -42,7 +45,10 @@ export async function startConsumer(validationService: ValidationService): Promi
             }
 
             try {
-                const result = await handlePostContentEvent(value, validationService);
+                const result = await handlePostContentEvent(value, validationService, {
+                    imageModeration,
+                    heartbeat,
+                });
                 kafkaConsumedTotal.inc({
                     topic,
                     result: result.processed ? (result.valid ? "valid" : "rejected") : "skipped",

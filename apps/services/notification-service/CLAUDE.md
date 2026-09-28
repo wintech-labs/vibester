@@ -64,7 +64,9 @@ src/
                    postLiked.handler.ts            → post.liked → insertNotification("like", ...)
                    postCommented.handler.ts        → post.commented → insertNotification("comment", ...)
                    userDeleted.handler.ts          → user.deleted → deleta todas as notificações do usuário
-                   postValidationRejected.handler.ts → post.validation.rejected → insertNotification("post_rejected", autor, autor, postId, motivo)
+                   postValidationRejected.handler.ts → post.validation.rejected (só action "notify") → insertNotification("post_rejected", autor, autor, postId, motivo)
+                   postModerationHidden.handler.ts → post.moderation.hidden → insertNotification("post_rejected", ..., "Sua publicação foi removida porque…")
+                   postModeration.messages.ts      → código do motivo → texto pt-BR (compartilhado pelos dois handlers acima)
   workers/       email.worker.ts                   → fila in-memory de e-mail com concorrência máxima de 5 workers
   prisma/        index.ts                          → singleton do PrismaClient com adapter pg.Pool
   types/         notification.types.ts             → NotificationRow, NotificationGroup, NotificationGroupResponse, ActorSummary, PostSummary
@@ -162,12 +164,15 @@ Variáveis atuais:
 | `post.liked` | `postLiked.handler.ts` | Persiste notificação `like` para o autor do post |
 | `post.commented` | `postCommented.handler.ts` | Persiste notificação `comment` para o autor do post |
 | `user.deleted` | `userDeleted.handler.ts` | Deleta todas as notificações cujo `recipientId` é o usuário removido |
-| `post.validation.rejected` | `postValidationRejected.handler.ts` | Persiste notificação `post_rejected` para o autor quando a revalidação do `post-validation-service` reprova um post já publicado. Ver abaixo |
+| `post.validation.rejected` | `postValidationRejected.handler.ts` | Persiste notificação `post_rejected` (aviso; o post segue no ar) quando a revalidação do `post-validation-service` reprova um post já publicado. Ignora `action: "hide"`. Ver abaixo |
+| `post.moderation.hidden` | `postModerationHidden.handler.ts` | Persiste notificação `post_rejected` dizendo que a publicação **foi removida**. Publicado pelo post-service depois de ocultar o post |
 
 ### `post_rejected` — aviso do sistema
 
 - **`actorId` é o próprio autor** só porque o schema de `Notification` exige o campo. Na listagem, `enrich` **não** busca esse ator (devolve `actor: null`, que o app lê como "notificação do Vibester") e **busca** a miniatura do post (`refId`), para o autor saber qual publicação foi reprovada.
-- **O texto não pode dizer que o post foi ocultado.** A revalidação só avisa; o post continua no ar até alguém decidir o contrário. A instrução que vai junto é excluir, que é a única ação disponível no app hoje (não há edição de legenda).
+- **"Foi removida" só a partir de `post.moderation.hidden`.** Em `post.validation.rejected` o post continua no ar (ou vai ser ocultado pelo post-service, com `action: "hide"`, que este handler ignora). Dizer "removida" a partir da recomendação poderia afirmar algo que não aconteceu. No aviso comum, a instrução que vai junto é excluir, que é a única ação disponível no app hoje (não há edição de legenda).
+- **Automutilação (`IMAGE_SELF_HARM`) não é tratada como infração**: o texto é substituído por uma mensagem de apoio com o CVV (188), sem falar em diretrizes. Se o post foi removido por outro motivo e havia também automutilação, a mensagem de apoio vai junto da de remoção.
+- **Post apagado não tem miniatura** (`PostClient.getPost` devolve `imageUrl: ""`). Quando quem apagou foi a moderação de imagem, a foto é o que foi removido — e voltaria a aparecer em toda notificação daquele post, inclusive nas curtidas antigas.
 - O evento carrega só o **código** do motivo, nunca o termo casado. `MESSAGE_BY_CODE` no handler traduz para pt-BR; código desconhecido cai numa frase genérica.
 - Pode chegar duplicado (o worker republica quando o Kafka reentrega a mensagem de origem). O agrupamento por `type:refId` junta as duplicatas numa linha só na listagem.
 

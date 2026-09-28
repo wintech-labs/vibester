@@ -10,6 +10,7 @@ import { handleExcessiveAttemptsEvent } from "./handlers/excessiveAttempts.handl
 import { handlePasswordResetEvent } from "./handlers/passwordReset.handler";
 import { handleContentReportedEvent } from "./handlers/contentReported.handler";
 import { handlePostValidationRejectedEvent } from "./handlers/postValidationRejected.handler";
+import { handlePostModerationHiddenEvent } from "./handlers/postModerationHidden.handler";
 
 export const kafka = new Kafka({
   clientId: "notification-service",
@@ -36,6 +37,10 @@ const TOPICS = [
   // Publicado pelo post-validation-service (modo worker) quando a revalidacao
   // reprova um post que ja esta no ar.
   "post.validation.rejected",
+  // Publicado pelo post-service depois de ocultar um post por moderacao de
+  // imagem. E daqui, e nao da recomendacao do validador, que sai o aviso
+  // "sua publicacao foi removida".
+  "post.moderation.hidden",
 ];
 
 export async function startKafkaConsumers(): Promise<void> {
@@ -82,6 +87,9 @@ export async function startKafkaConsumers(): Promise<void> {
             break;
           case "post.validation.rejected":
             await handlePostValidationRejectedEvent(value);
+            break;
+          case "post.moderation.hidden":
+            await handlePostModerationHiddenEvent(value);
             break;
           case "user.deleted":
             await handleUserDeletedEvent(value);

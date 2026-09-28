@@ -11,6 +11,7 @@ export default defineConfig({
       provider: "v8",
       include: [
         "src/rules/**",
+        "src/moderation/**",
         "src/services/**",
         "src/controllers/**",
         "src/kafka/handlers/**",
