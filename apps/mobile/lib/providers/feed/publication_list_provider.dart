@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -16,12 +17,32 @@ class _Carga {
 }
 
 class PublicationListProvider extends ChangeNotifier {
-  PublicationListProvider({FeedService? feedService, PostService? postService})
-    : _feedService = feedService ?? FeedService(),
-      _postService = postService ?? PostService();
+  PublicationListProvider({
+    FeedService? feedService,
+    PostService? postService,
+    List<Duration>? moderationChecks,
+  }) : _feedService = feedService ?? FeedService(),
+       _postService = postService ?? PostService(),
+       _moderationChecks = moderationChecks ?? defaultModerationChecks;
 
   final FeedService _feedService;
   final PostService _postService;
+
+  /// Quando, depois de publicar, o app pergunta se a moderação de imagem
+  /// removeu o post.
+  ///
+  /// A moderação roda no worker do post-validation-service, que dá a cada post
+  /// um orçamento de 45s (ver o CLAUDE.md dele); o caso comum termina em
+  /// poucos segundos. A primeira consulta pega o caso comum e a segunda vem
+  /// depois do orçamento. Duas leituras por post publicado é custo desprezível
+  /// perto das leituras do feed, e publicar é raro perto de ler.
+  static const defaultModerationChecks = [
+    Duration(seconds: 15),
+    Duration(seconds: 60),
+  ];
+
+  final List<Duration> _moderationChecks;
+  final Map<String, Timer> _moderationTimers = {};
 
   final List<PublicationModel> _publications = [];
   String? _nextCursor;
@@ -81,7 +102,10 @@ class PublicationListProvider extends ChangeNotifier {
     if (!sameUser) {
       // Post da sessão anterior é de outra conta; antes da primeira busca
       // (`_userId` nulo) ainda não há conta anterior para descartar.
-      if (_userId != null) _ownPublications.clear();
+      if (_userId != null) {
+        _ownPublications.clear();
+        _cancelModerationWatches();
+      }
       _publications.clear();
       _nextCursor = null;
       _hasMore = true;
@@ -215,6 +239,10 @@ class PublicationListProvider extends ChangeNotifier {
     final removed = index == -1 ? null : _publications.removeAt(index);
     if (removed != null) notifyListeners();
 
+    // Excluído pelo autor: a consulta da moderação veria `isDeleted` e
+    // anunciaria uma remoção que não aconteceu.
+    _moderationTimers.remove(id)?.cancel();
+
     try {
       await _postService.deletePost(postId: id, userId: userId);
       _ownPublications.removeWhere((p) => p.id == id);
@@ -225,6 +253,69 @@ class PublicationListProvider extends ChangeNotifier {
       }
       rethrow;
     }
+  }
+
+  /// Acompanha um post recém-publicado até a moderação de imagem decidir.
+  ///
+  /// Se ela removeu o post, ele sai da lista (e de [_ownPublications], senão
+  /// o próximo refresh o traria de volta) e [onRemoved] avisa a tela. O motivo
+  /// não vem daqui: o notification-service grava o aviso `post_rejected` com o
+  /// texto pronto, e é lá que a pessoa lê por que foi removido.
+  ///
+  /// Falha de rede numa consulta não é veredito: só segue para a próxima.
+  void watchModeration(String postId, {required VoidCallback onRemoved}) {
+    _moderationTimers.remove(postId)?.cancel();
+    _scheduleModerationCheck(postId, 0, onRemoved);
+  }
+
+  void _scheduleModerationCheck(
+    String postId,
+    int attempt,
+    VoidCallback onRemoved,
+  ) {
+    if (attempt >= _moderationChecks.length) {
+      _moderationTimers.remove(postId);
+      return;
+    }
+
+    final previous = attempt == 0
+        ? Duration.zero
+        : _moderationChecks[attempt - 1];
+    final wait = _moderationChecks[attempt] - previous;
+
+    _moderationTimers[postId] = Timer(wait, () async {
+      final status = await _postService.moderationStatus(postId);
+      // Cancelado enquanto a consulta estava no ar (logout, exclusão).
+      if (!_moderationTimers.containsKey(postId)) return;
+
+      if (status == PostModerationStatus.removed) {
+        _moderationTimers.remove(postId);
+        _removeModerated(postId);
+        onRemoved();
+        return;
+      }
+      _scheduleModerationCheck(postId, attempt + 1, onRemoved);
+    });
+  }
+
+  void _removeModerated(String postId) {
+    _ownPublications.removeWhere((p) => p.id == postId);
+    final before = _publications.length;
+    _publications.removeWhere((p) => p.id == postId);
+    if (_publications.length != before) notifyListeners();
+  }
+
+  void _cancelModerationWatches() {
+    for (final timer in _moderationTimers.values) {
+      timer.cancel();
+    }
+    _moderationTimers.clear();
+  }
+
+  @override
+  void dispose() {
+    _cancelModerationWatches();
+    super.dispose();
   }
 
   Future<void> toggleLike(String? id, String? userId) async {

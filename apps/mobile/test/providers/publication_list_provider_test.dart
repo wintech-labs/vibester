@@ -5,6 +5,7 @@ import 'package:mobile/models/feed/feed_item_model.dart';
 import 'package:mobile/models/feed/publication_model.dart';
 import 'package:mobile/providers/feed/publication_list_provider.dart';
 import 'package:mobile/service/feed/feed_service.dart';
+import 'package:mobile/service/posts/post_service.dart';
 
 /// O feed é a lista mais longa do app e a única que mistura tipos de item —
 /// estes testes cobrem o que a tela não deixa ver: o que acontece entre o
@@ -31,6 +32,29 @@ class _FakeFeedService extends FeedService {
     if (erro != null) throw erro!;
     return paginas[cursoresPedidos.length - 1];
   }
+}
+
+/// Responde a consulta da moderação na ordem de [respostas]; esgotadas,
+/// o post segue no ar.
+class _FakePostService extends PostService {
+  _FakePostService(this.respostas);
+
+  final List<PostModerationStatus> respostas;
+  final List<String> consultas = [];
+
+  @override
+  Future<PostModerationStatus> moderationStatus(String postId) async {
+    consultas.add(postId);
+    return consultas.length <= respostas.length
+        ? respostas[consultas.length - 1]
+        : PostModerationStatus.visible;
+  }
+
+  @override
+  Future<void> deletePost({
+    required String postId,
+    required String userId,
+  }) async {}
 }
 
 FeedItemModel _post(String id, {DateTime? em}) => FeedItemModel(
@@ -274,6 +298,104 @@ void main() {
       await provider.fetchPublications('conta-2');
 
       expect(provider.publications.map((p) => p.id), ['p2']);
+    });
+  });
+
+  group('moderação de imagem depois de publicar', () {
+    const checks = [Duration(milliseconds: 10), Duration(milliseconds: 30)];
+
+    PublicationModel meu(String id) => PublicationModel(
+      id: id,
+      autor: 'eu',
+      autorProfileImage: '',
+      publicationImage: '',
+      description: '',
+      publicatedAt: DateTime(2026, 9, 2),
+    );
+
+    Future<PublicationListProvider> montar(_FakePostService posts) async {
+      final provider = PublicationListProvider(
+        feedService: _FakeFeedService([
+          FeedPage(items: [_post('p1')], nextCursor: null),
+          FeedPage(items: [_post('p1')], nextCursor: null),
+        ]),
+        postService: posts,
+        moderationChecks: checks,
+      );
+      await provider.fetchPublications('conta-1');
+      provider.addOwnPublication(meu('meu'));
+      return provider;
+    }
+
+    test('post removido sai da lista e não volta no refresh', () async {
+      final posts = _FakePostService([PostModerationStatus.removed]);
+      final provider = await montar(posts);
+      var avisos = 0;
+
+      provider.watchModeration('meu', onRemoved: () => avisos++);
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+
+      expect(provider.publications.map((p) => p.id), ['p1']);
+      expect(avisos, 1);
+      expect(posts.consultas, ['meu'], reason: 'removido encerra a checagem');
+
+      await provider.fetchPublications('conta-1', force: true);
+      expect(provider.publications.map((p) => p.id), ['p1']);
+    });
+
+    test('falha de rede não é veredito: segue para a próxima', () async {
+      final posts = _FakePostService([
+        PostModerationStatus.unknown,
+        PostModerationStatus.removed,
+      ]);
+      final provider = await montar(posts);
+      var avisos = 0;
+
+      provider.watchModeration('meu', onRemoved: () => avisos++);
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+
+      expect(posts.consultas, ['meu', 'meu']);
+      expect(avisos, 1);
+      expect(provider.publications.map((p) => p.id), ['p1']);
+    });
+
+    test('post aprovado fica e as consultas param no fim', () async {
+      final posts = _FakePostService([]);
+      final provider = await montar(posts);
+      var avisos = 0;
+
+      provider.watchModeration('meu', onRemoved: () => avisos++);
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(posts.consultas, ['meu', 'meu']);
+      expect(avisos, 0);
+      expect(provider.publications.map((p) => p.id), ['meu', 'p1']);
+    });
+
+    test('exclusão pelo autor cancela o aviso de remoção', () async {
+      final posts = _FakePostService([PostModerationStatus.removed]);
+      final provider = await montar(posts);
+      var avisos = 0;
+
+      provider.watchModeration('meu', onRemoved: () => avisos++);
+      await provider.deletePublication('meu', 'conta-1');
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+
+      expect(posts.consultas, isEmpty);
+      expect(avisos, 0);
+    });
+
+    test('troca de conta cancela a checagem', () async {
+      final posts = _FakePostService([PostModerationStatus.removed]);
+      final provider = await montar(posts);
+      var avisos = 0;
+
+      provider.watchModeration('meu', onRemoved: () => avisos++);
+      await provider.fetchPublications('conta-2');
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+
+      expect(posts.consultas, isEmpty);
+      expect(avisos, 0);
     });
   });
 }
