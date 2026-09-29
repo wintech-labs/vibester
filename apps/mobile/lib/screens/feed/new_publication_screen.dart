@@ -3,8 +3,10 @@ import 'package:mobile/models/media/media_item.dart';
 import 'package:mobile/models/place/place_model.dart';
 import 'package:mobile/models/user/user_model.dart';
 import 'package:mobile/providers/feed/publication_list_provider.dart';
+import 'package:mobile/providers/notification/notification_provider.dart';
 import 'package:mobile/providers/user/user_provider.dart';
 import 'package:mobile/service/media/media_processor.dart';
+import 'package:mobile/service/media_upload_service.dart';
 import 'package:mobile/service/posts/post_service.dart';
 import 'package:mobile/theme/app_motion.dart';
 import 'package:mobile/theme/app_spacing.dart';
@@ -61,6 +63,12 @@ class _NewPublicationScreenState extends State<NewPublicationScreen> {
 
   List<MediaItem> _media = const [];
 
+  /// Mídias já no R2 desde a última tentativa de publicar. Quando o
+  /// post-service recusa o texto (422), a pessoa só corrige a legenda: sem
+  /// isto, cada nova tentativa subia as mesmas fotos de novo e deixava as
+  /// anteriores órfãs no bucket. Qualquer mudança em [_media] descarta.
+  List<UploadedMedia>? _uploaded;
+
   /// Item mostrado no quadro grande.
   int _selected = 0;
   PlaceModel? _place;
@@ -91,6 +99,7 @@ class _NewPublicationScreenState extends State<NewPublicationScreen> {
     setState(() {
       _selected = _media.length;
       _media = [..._media, ...picked];
+      _uploaded = null;
     });
   }
 
@@ -98,6 +107,7 @@ class _NewPublicationScreenState extends State<NewPublicationScreen> {
     final removed = _media[index];
     setState(() {
       _media = [..._media]..removeAt(index);
+      _uploaded = null;
       if (_selected >= _media.length) _selected = _media.length - 1;
       if (_selected < 0) _selected = 0;
     });
@@ -111,6 +121,7 @@ class _NewPublicationScreenState extends State<NewPublicationScreen> {
       final list = [..._media];
       list.insert(to, list.removeAt(from));
       _media = list;
+      _uploaded = null;
       _selected = list.indexOf(selectedItem);
     });
   }
@@ -134,6 +145,10 @@ class _NewPublicationScreenState extends State<NewPublicationScreen> {
     setState(() => _publishing = true);
 
     try {
+      final uploaded = _uploaded ??= await _postService.uploadMedia(
+        userId: user.userID.toString(),
+        media: _media,
+      );
       final created = await _postService.createPost(
         userVerified: false,
         userProfilePicture: user.fotoPerfil,
@@ -141,7 +156,7 @@ class _NewPublicationScreenState extends State<NewPublicationScreen> {
         // O id do autor vem sempre do usuário em sessão, nunca de argumento
         // de rota — é a barreira do app contra publicar em nome de outro.
         userId: user.userID.toString(),
-        media: _media,
+        media: uploaded,
         caption: _captionController.text.trim(),
         establishmentId: _place?.id,
         establishmentName: _place?.nome,
@@ -154,7 +169,15 @@ class _NewPublicationScreenState extends State<NewPublicationScreen> {
       // de que a publicação deu certo. O feed-service só o grava no feed do
       // autor depois, via Kafka — um refresh agora ainda viria sem ele.
       if (created != null && mounted) {
-        context.read<PublicationListProvider>().addOwnPublication(created);
+        final feed = context.read<PublicationListProvider>();
+        feed.addOwnPublication(created);
+        final postId = created.id;
+        if (postId != null) {
+          feed.watchModeration(
+            postId,
+            onRemoved: _moderationRemovalNotice(user),
+          );
+        }
       }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
@@ -171,6 +194,37 @@ class _NewPublicationScreenState extends State<NewPublicationScreen> {
       );
       debugPrint('Falha ao publicar: $e');
     }
+  }
+
+  /// O que acontece quando a moderação de imagem remove o post, segundos
+  /// depois de esta tela fechar.
+  ///
+  /// Tudo que precisa de `context` é lido agora: o `ScaffoldMessenger` é o do
+  /// `MaterialApp`, que continua vivo e mostra o aviso sobre a tela em que a
+  /// pessoa estiver. O motivo detalhado fica na notificação `post_rejected`
+  /// que o notification-service grava — por isso o sino é atualizado junto.
+  VoidCallback _moderationRemovalNotice(UserModel author) {
+    final messenger = ScaffoldMessenger.of(context);
+    final notifications = context.read<NotificationProvider>();
+    final session = context.read<UserProvider>();
+    final accountId = author.accountId;
+
+    return () {
+      // Saiu da conta (ou trocou) enquanto a checagem corria: o aviso é de
+      // outra sessão.
+      if (accountId == null || session.user?.accountId != accountId) return;
+
+      notifications.markStale();
+      notifications.fetchUnreadCount(accountId);
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Sua publicação foi removida por não seguir as diretrizes da '
+            'comunidade. O motivo está nas notificações.',
+          ),
+        ),
+      );
+    };
   }
 
   @override

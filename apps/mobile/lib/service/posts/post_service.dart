@@ -7,25 +7,48 @@ import 'package:mobile/service/api_endpoints.dart';
 import 'package:mobile/service/api_error.dart';
 import 'package:mobile/service/media_upload_service.dart';
 
+/// O que a moderação de imagem decidiu sobre um post já publicado.
+enum PostModerationStatus {
+  /// O post continua no ar.
+  visible,
+
+  /// O post foi ocultado (`isDeleted`) ou já não existe.
+  removed,
+
+  /// Não deu para saber agora (rede, 5xx). Não é veredito.
+  unknown,
+}
+
 class PostService {
   final MediaUploadService _mediaUpload = MediaUploadService();
 
+  /// Sobe as mídias ao R2. Separado de [createPost] para o composer guardar o
+  /// resultado: quando o post-service recusa o texto (422), a pessoa corrige a
+  /// legenda e publica de novo sem reenviar as fotos.
+  Future<List<UploadedMedia>> uploadMedia({
+    required String userId,
+    required List<MediaItem> media,
+  }) => _mediaUpload.upload(userId: userId, items: media);
+
   /// Devolve o post criado, para o feed exibi-lo na hora — ou `null` se a
   /// resposta não trouxer o corpo esperado (o post foi criado mesmo assim).
+  ///
+  /// O post-service valida o texto no post-validation-service antes de gravar
+  /// e responde 422 com os motivos já em pt-BR, que chegam à tela pelo
+  /// `apiErrorMessage`. As fotos não são checadas aqui: a moderação de imagem
+  /// roda depois de publicado (ver [moderationStatus]).
   Future<PublicationModel?> createPost({
     required String userId,
     required String userUsername,
     required String userProfilePicture,
     required bool userVerified,
     required String caption,
-    required List<MediaItem> media,
+    required List<UploadedMedia> media,
     String? establishmentId,
     String? establishmentName,
     String? establishmentLogo,
     String? establishmentCategory,
   }) async {
-    final uploaded = await _mediaUpload.upload(userId: userId, items: media);
-
     try {
       final response = await ApiClient.dio.post(
         ApiEndpoints.posts(),
@@ -39,7 +62,7 @@ class PostService {
           'userProfilePicture': ?_nonEmpty(userProfilePicture),
           'userVerified': userVerified,
           'caption': caption,
-          'media': [for (final item in uploaded) item.toJson()],
+          'media': [for (final item in media) item.toJson()],
           'establishmentId': ?_nonEmpty(establishmentId),
           'establishmentName': ?_nonEmpty(establishmentName),
           'establishmentLogo': ?_nonEmpty(establishmentLogo),
@@ -96,6 +119,28 @@ class PostService {
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) return;
       throw Exception(apiErrorMessage(e, 'Erro ao excluir post'));
+    }
+  }
+
+  /// Estado do post depois da moderação de imagem.
+  ///
+  /// A checagem de nudez e de violência gráfica roda no worker do
+  /// post-validation-service **depois** do `post.created`. Quando ela pede
+  /// ocultação, o post-service marca o post `isDeleted` (e invalida o cache de
+  /// `GET /posts/:id`). Sem esta consulta, o post removido continuava no feed
+  /// do próprio autor até o próximo refresh, como se tivesse sido aprovado.
+  Future<PostModerationStatus> moderationStatus(String postId) async {
+    try {
+      final response = await ApiClient.dio.get(ApiEndpoints.post(postId));
+      final body = response.data;
+      if (body is Map && body['isDeleted'] == true) {
+        return PostModerationStatus.removed;
+      }
+      return PostModerationStatus.visible;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) return PostModerationStatus.removed;
+      debugPrint('Falha ao consultar a moderação do post $postId: $e');
+      return PostModerationStatus.unknown;
     }
   }
 

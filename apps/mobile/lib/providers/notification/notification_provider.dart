@@ -90,6 +90,13 @@ class NotificationProvider extends ChangeNotifier {
     }
   }
 
+  /// Obriga a próxima abertura da tela a buscar de novo, sem esperar a janela
+  /// de 5 minutos. Usado quando o app sabe que chegou aviso novo — a remoção
+  /// de um post pela moderação — e a lista em memória ainda não o tem.
+  void markStale() {
+    _lastFetchedAt = null;
+  }
+
   /// Descarta tudo que pertence à sessão anterior.
   ///
   /// O provider vive no topo da árvore e sobrevive ao logout: sem esta
