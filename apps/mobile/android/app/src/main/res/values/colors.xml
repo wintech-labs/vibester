@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#041440</color>
+    <!-- noturno do tema escuro: fundo da abertura nativa e do primeiro quadro
+         da VibesterSplash. -->
+    <color name="splash_background">#0C0910</color>
 </resources>

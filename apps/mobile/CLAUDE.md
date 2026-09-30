@@ -24,6 +24,14 @@ HOJE      → screens/home/today_screen.dart      descoberta: agora, hoje, perto
 VOCÊ      → screens/user/user_profile_screen.dart identidade + atalho pra "Seus rolês"
 ```
 
+**Abertura**: o `main()` chama `runApp` na hora com `SplashGate`
+(`widgets/motion/vibester_splash.dart`), que mostra a `VibesterSplash`
+(logotipo em néon com degradê piscando) enquanto `_boot()` lê storage seguro,
+tema e preferências; o app é montado embaixo e revelado quando entrada e boot
+terminam. Não volte a pôr `await` antes do `runApp` — era isso que dava tela
+preta. A tela nativa (LaunchScreen.storyboard / `launch_background.xml`) é só o
+`noturno` #0C0910, igual ao primeiro quadro da animação.
+
 Notificações vivem no sino do cabeçalho de HOJE (`/notifications`); salvos e
 check-ins vivem em `/saved` (`screens/saved/saved_screen.dart`), acessível pelo
 perfil. Não existe mais aba dentro de aba: a `TabBar` FEED/DESTAQUES/EM ALTA e
