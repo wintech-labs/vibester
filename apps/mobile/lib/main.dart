@@ -57,6 +57,7 @@ import 'package:mobile/screens/user/profile_editing_screen.dart';
 import 'package:mobile/screens/user/user_interests_screen.dart';
 import 'package:mobile/screens/user/user_profile_screen.dart';
 import 'package:mobile/widgets/cards/highlights/post_detail_screen.dart';
+import 'package:mobile/widgets/motion/vibester_splash.dart';
 import 'package:provider/provider.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
@@ -94,6 +95,15 @@ void main() async {
     milliseconds: 100,
   );
 
+  // O app sobe na hora com a abertura animada, e o boot (storage seguro,
+  // tema, preferências) roda por trás dela. Esperar tudo isso antes do
+  // `runApp` deixava o aparelho sem quadro para pintar: tela preta até o feed
+  // aparecer de repente. Ver `SplashGate`.
+  runApp(SplashGate<MyApp>(boot: _boot(), builder: (app) => app));
+}
+
+/// Tudo o que precisa estar lido antes da primeira tela do app.
+Future<MyApp> _boot() async {
   await initializeDateFormatting('pt_BR', null);
   // Interesses escolhidos no onboarding: restaurados antes da primeira tela
   // pra a régua de categorias da Home já nascer na ordem do usuário.
@@ -126,14 +136,12 @@ void main() async {
   // o app já nasce com a escolha do usuário, sem abrir no padrão e trocar um
   // quadro depois.
   final initialPreferences = await PreferencesService.load();
-  runApp(
-    MyApp(
-      savedUser: savedUser,
-      etapaPendente: etapaPendente,
-      initialThemeMode: initialThemeMode,
-      initialPreferences: initialPreferences,
-      sessaoExpirada: sessaoExpirada,
-    ),
+  return MyApp(
+    savedUser: savedUser,
+    etapaPendente: etapaPendente,
+    initialThemeMode: initialThemeMode,
+    initialPreferences: initialPreferences,
+    sessaoExpirada: sessaoExpirada,
   );
 }
 
@@ -331,7 +339,6 @@ class _MyAppState extends State<MyApp> {
     NavigatorState navigator,
     String token,
   ) async {
-
     // Capturados antes do await: depois dele o context do navigator pode ter
     // sido desmontado, e usá-lo cruzando o gap assíncrono é o que o
     // use_build_context_synchronously alerta.
