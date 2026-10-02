@@ -13,10 +13,20 @@ class NavbarDestination {
   /// Rótulo em DM Mono, visível só quando o destino está ativo.
   final String label;
 
+  /// TAMANHO DO ÍCONE: tamanho próprio deste destino. Nulo usa o padrão da
+  /// navbar ([NavbarTokens.iconSize]).
+  ///
+  /// Existe para ícones de outra família, como os do Font Awesome: os ícones
+  /// do Material têm uma margem interna no desenho, e os do Font Awesome
+  /// ocupam o quadrado inteiro — no mesmo tamanho, parecem maiores que os
+  /// vizinhos. Um valor menor aqui equilibra o peso visual.
+  final double? iconSize;
+
   const NavbarDestination({
     required this.icon,
     required this.activeIcon,
     required this.label,
+    this.iconSize,
   });
 }
 
@@ -201,7 +211,8 @@ class _Content extends StatelessWidget {
               child: Icon(
                 active ? destination.activeIcon : destination.icon,
                 key: ValueKey(active),
-                size: NavbarTokens.iconSize,
+                // TAMANHO DO ÍCONE: o do destino, quando ele define um.
+                size: destination.iconSize ?? NavbarTokens.iconSize,
                 // Sem brilho no ícone: o destaque do item ativo é a cor de
                 // fundo da cápsula e mais nada.
                 color: foreground,

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:mobile/providers/safety/block_provider.dart';
 import 'package:mobile/providers/notification/notification_provider.dart';
 import 'package:mobile/providers/preferences/preferences_provider.dart';
@@ -27,7 +28,7 @@ import 'package:mobile/service/interaction/interaction_tracker.dart';
 /// Aqui existe uma navegação só, com quatro destinos e uma ação:
 ///
 /// * **FEED** — o social: o que as pessoas estão postando (tela inicial).
-/// * **EXPLORAR** — busca ativa: categorias, lugares, eventos, pessoas.
+/// * **BUSCA** — busca ativa: categorias, lugares, eventos, pessoas.
 /// * **(+)** — publicar (ação, não destino: volta pra onde o usuário estava).
 /// * **HOJE** — descoberta: o que está rolando agora, perto, nesta semana.
 /// * **VOCÊ** — identidade, salvos e ajustes.
@@ -130,23 +131,50 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     UserProfileScreen(key: _profileKey),
   ];
 
-  static const _navDestinations = [
-    NavbarDestination(
+  // ÍCONE DE HOJE: `final` em vez de `const`. O `.data` do ícone do Font
+  // Awesome é um campo lido de um objeto, e o Dart não aceita isso numa
+  // constante. Os outros destinos continuam `const` um a um.
+  static final _navDestinations = [
+    const NavbarDestination(
       icon: Icons.dynamic_feed_outlined,
       activeIcon: Icons.dynamic_feed,
       label: 'FEED',
     ),
-    NavbarDestination(
-      icon: Icons.explore_outlined,
-      activeIcon: Icons.explore,
+    // ÍCONE DE BUSCA: lupa no lugar da bússola. A bússola lia como "explorar"
+    // e o destino se chama BUSCA; a lupa é o símbolo que qualquer pessoa
+    // associa a procurar algo.
+    //
+    // Mesmo ícone nos dois estados: o Material não tem uma lupa preenchida
+    // distinta da vazada. O destino ativo continua marcado pela cápsula e
+    // pela cor, como em HOJE.
+    const NavbarDestination(
+      icon: Icons.search_rounded,
+      activeIcon: Icons.search_rounded,
       label: 'BUSCA',
     ),
+    // ÍCONE DE HOJE: a chama curva do Font Awesome (fire-flame-curved) no
+    // lugar do raio.
+    //
+    // `.data`: desde a versão 11 do `font_awesome_flutter`, os ícones dele
+    // (`FaIconData`) deixaram de ser `IconData`, que é o tipo que a navbar
+    // desenha. O `.data` entrega o `IconData` por baixo — o mesmo glifo, na
+    // fonte do pacote —, então a navbar não precisou mudar. Funciona bem aqui
+    // porque a chama é mais alta que larga e cabe no quadrado do ícone.
+    //
+    // Mesmo ícone nos dois estados: a versão gratuita só tem a chama
+    // preenchida (a vazada é da versão paga). O destino ativo continua
+    // marcado pela cápsula e pela cor, como nos outros.
+    //
+    // TAMANHO DO ÍCONE: 20 em vez dos 23 dos outros. O ícone do Font Awesome
+    // ocupa o quadrado inteiro e, no tamanho padrão, ficava maior que os
+    // vizinhos.
     NavbarDestination(
-      icon: Icons.bolt_outlined,
-      activeIcon: Icons.bolt,
-      label: 'HOJE',
+      icon: FontAwesomeIcons.fireFlameCurved.data,
+      activeIcon: FontAwesomeIcons.fireFlameCurved.data,
+      label: 'ROLÊS',
+      iconSize: 20,
     ),
-    NavbarDestination(
+    const NavbarDestination(
       icon: Icons.person_outline_rounded,
       activeIcon: Icons.person_rounded,
       label: 'VOCÊ',
